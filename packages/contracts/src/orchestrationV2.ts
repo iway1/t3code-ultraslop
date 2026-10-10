@@ -628,6 +628,19 @@ export const OrchestrationV2ExecutionNode = Schema.Struct({
 });
 export type OrchestrationV2ExecutionNode = typeof OrchestrationV2ExecutionNode.Type;
 
+/**
+ * Tokens a subagent used across all of its model calls. Set at its terminal
+ * update by drivers that run subagents inside the parent's session (Claude);
+ * drivers that give subagents their own provider turns report usage there.
+ * Input counts cache reads and writes.
+ */
+export const OrchestrationV2SubagentTokenUsage = Schema.Struct({
+  inputTokens: NonNegativeInt,
+  cachedInputTokens: NonNegativeInt,
+  outputTokens: NonNegativeInt,
+});
+export type OrchestrationV2SubagentTokenUsage = typeof OrchestrationV2SubagentTokenUsage.Type;
+
 export const OrchestrationV2Subagent = Schema.Struct({
   id: NodeId,
   threadId: ThreadId,
@@ -662,6 +675,7 @@ export const OrchestrationV2Subagent = Schema.Struct({
   ]),
   progress: Schema.optional(Schema.String),
   result: Schema.NullOr(Schema.String),
+  tokenUsage: Schema.optional(OrchestrationV2SubagentTokenUsage),
   startedAt: Schema.NullOr(Schema.DateTimeUtc),
   completedAt: Schema.NullOr(Schema.DateTimeUtc),
   updatedAt: Schema.DateTimeUtc,

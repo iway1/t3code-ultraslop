@@ -11,6 +11,8 @@ import type {
   ProviderDriverKind,
   ServerProvider,
   ServerProviderUpdateState,
+  SetSkillEnabledInput,
+  SkillToggleError,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -59,6 +61,14 @@ export interface ProviderRegistryShape {
     readonly cwd: string;
     readonly fresh?: boolean;
   }) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+
+  /**
+   * Switch one of the cwd's listed skills on or off in the provider's
+   * user-wide config, then rescan the cwd so every client sees the change.
+   */
+  readonly setSkillEnabled: (
+    input: SetSkillEnabledInput,
+  ) => Effect.Effect<ReadonlyArray<ServerProvider>, SkillToggleError>;
 
   /**
    * Resolve the maintenance capabilities owned by one live provider instance.

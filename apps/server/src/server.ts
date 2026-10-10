@@ -150,6 +150,7 @@ import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts
 import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinary.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as SkillUsage from "./usage/SkillUsage.ts";
 import {
   OrchestrationEventInfrastructureLayerLive,
   OrchestrationV2ProductionLayerLive,
@@ -530,6 +531,16 @@ const RuntimeCoreDependenciesBaseLive = Layer.mergeAll(
   ).pipe(
     Layer.provide(PullRequestWatchReactor.layer),
     Layer.provide(PullRequestServiceLive),
+    Layer.provide(ProjectionStoreV2.layer),
+  ),
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const service = yield* SkillUsage.SkillUsage;
+      yield* service.start();
+    }),
+  ).pipe(
+    // Merged because ws.ts reads the Skill Monitor's averages from it.
+    Layer.provideMerge(SkillUsage.layer),
     Layer.provide(ProjectionStoreV2.layer),
   ),
   // Subscribes to `account.rate-limits.updated` so usage bars track live

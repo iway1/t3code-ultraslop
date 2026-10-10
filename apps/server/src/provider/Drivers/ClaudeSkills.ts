@@ -24,6 +24,7 @@ import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import { parse as parseYamlDocument } from "yaml";
 
+import { writeFileStringAtomically } from "../../atomicWrite.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 
 type ClaudeSkillScope = "user" | "project";
@@ -381,4 +382,80 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
   }
 
   return [...skillsByName.values()].sort((left, right) => left.name.localeCompare(right.name));
+});
+
+// Strict JSON on purpose: a settings file with comments is one the user edits
+// by hand, and rewriting it would drop them, so it is left to the user.
+const ClaudeUserSettingsJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown));
+const decodeClaudeUserSettings = Schema.decodeUnknownEffect(ClaudeUserSettingsJson);
+
+export class ClaudeSkillToggleError extends Schema.TaggedError<ClaudeSkillToggleError>()(
+  "ClaudeSkillToggleError",
+  {
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+/**
+ * Switch a skill on or off for every project through `skillOverrides` in the
+ * user `settings.json`. Turning it on removes the entry rather than writing
+ * `"on"`, so the user file goes back to how it was; a project, local, or
+ * managed settings file can still switch it off, which the next scan shows.
+ */
+export const setClaudeSkillEnabled = Effect.fn("setClaudeSkillEnabled")(function* (input: {
+  readonly config: Pick<ClaudeSettings, "homePath">;
+  readonly environment: NodeJS.ProcessEnv;
+  readonly name: string;
+  readonly enabled: boolean;
+}): Effect.fn.Return<void, ClaudeSkillToggleError, FileSystem.FileSystem | Path.Path> {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const settingsPath = path.join(
+    yield* resolveClaudeConfigDirPath(input.config, input.environment),
+    "settings.json",
+  );
+  const contents = yield* fileSystem.readFileString(settingsPath).pipe(
+    Effect.catchTag("PlatformError", (error) =>
+      error.reason._tag === "NotFound"
+        ? Effect.succeed("{}")
+        : Effect.fail(
+            new ClaudeSkillToggleError({
+              detail: `Could not read ${settingsPath}.`,
+              cause: error,
+            }),
+          ),
+    ),
+  );
+  const settings = yield* decodeClaudeUserSettings(contents.trim() === "" ? "{}" : contents).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ClaudeSkillToggleError({
+          detail: `${settingsPath} is not plain JSON (it may have comments). Edit skillOverrides there by hand.`,
+          cause,
+        }),
+    ),
+  );
+  const current = settings.skillOverrides;
+  const overrides: Record<string, unknown> =
+    current !== null && typeof current === "object" && !Array.isArray(current)
+      ? { ...current }
+      : {};
+  if (input.enabled) {
+    delete overrides[input.name];
+  } else {
+    overrides[input.name] = "off";
+  }
+  const { skillOverrides: _previous, ...rest } = settings;
+  const next = Object.keys(overrides).length === 0 ? rest : { ...rest, skillOverrides: overrides };
+  yield* writeFileStringAtomically({
+    filePath: settingsPath,
+    // Pretty-printed like the CLI writes it; a Schema encode would be one line.
+    // @effect-diagnostics-next-line preferSchemaOverJson:off
+    contents: `${JSON.stringify(next, null, 2)}\n`,
+  }).pipe(
+    Effect.mapError(
+      (cause) => new ClaudeSkillToggleError({ detail: `Could not write ${settingsPath}.`, cause }),
+    ),
+  );
 });

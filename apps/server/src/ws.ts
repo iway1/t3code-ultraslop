@@ -218,6 +218,7 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as SkillUsage from "./usage/SkillUsage.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
@@ -1237,6 +1238,7 @@ const makeWsRpcLayer = (
               Effect.orElseSucceed(() => null),
             );
       const usage = yield* UsageService.UsageService;
+      const skillUsage = yield* SkillUsage.SkillUsage;
       const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
@@ -2603,6 +2605,18 @@ const makeWsRpcLayer = (
           ),
         [WS_METHODS.serverGetUsageSummary]: (input) =>
           observeRpcEffect(WS_METHODS.serverGetUsageSummary, usage.readSummary(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverSetSkillEnabled]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverSetSkillEnabled,
+            providerRegistry
+              .setSkillEnabled(input)
+              .pipe(Effect.map((providers) => ({ providers }))),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverGetSkillUsageSummary]: (input) =>
+          observeRpcEffect(WS_METHODS.serverGetSkillUsageSummary, skillUsage.readSummary(input), {
             "rpc.aggregate": "server",
           }),
         [WS_METHODS.serverRefreshUsageRates]: (_input) =>

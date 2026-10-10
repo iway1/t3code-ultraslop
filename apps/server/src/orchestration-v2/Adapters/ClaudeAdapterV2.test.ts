@@ -5384,6 +5384,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     readonly messageId?: string;
     readonly text?: string;
     readonly bashToolUseId?: string;
+    readonly usage?: {
+      readonly input_tokens: number;
+      readonly cache_creation_input_tokens: number | null;
+      readonly cache_read_input_tokens: number | null;
+      readonly output_tokens: number;
+    };
   }): ReadonlyArray<SDKMessage> =>
     [
       ...(input.text === undefined ? [] : [{ type: "text", text: input.text }]),
@@ -5406,6 +5412,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           type: "message",
           role: "assistant",
           content: [block],
+          ...(input.usage === undefined ? {} : { usage: input.usage }),
         },
         parent_tool_use_id: input.parentToolUseId,
         uuid: index === 0 ? input.uuid : `${input.uuid}:${index}`,
@@ -6119,6 +6126,92 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           FINAL_REPORT,
         ]);
         assert.deepEqual(routing.assistantTexts(harness.threadId), ["The auditor finished."]);
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    ),
+  );
+
+  it.effect("totals a subagent's model calls once each on its terminal update", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const TASK_ID = "task-usage-subagent";
+        const TOOL_USE_ID = "toolu-usage-subagent";
+        const harness = yield* makeWakeHarness;
+        const now = yield* DateTime.now;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-claude-usage-subagent"),
+            text: "Run an auditor.",
+            attachments: [],
+          }),
+        );
+        const frames = [
+          // One call streamed as two content blocks, before task_started, so
+          // it is held and replayed; its usage must count once.
+          ...makeSubagentAssistantFrames({
+            parentToolUseId: TOOL_USE_ID,
+            uuid: "00000000-0000-4000-8000-000000000421",
+            text: "Starting.",
+            bashToolUseId: "toolu-usage-bash",
+            usage: {
+              input_tokens: 10,
+              cache_creation_input_tokens: 5,
+              cache_read_input_tokens: 100,
+              output_tokens: 7,
+            },
+          }),
+          makeSubagentToolResultFrame({
+            parentToolUseId: TOOL_USE_ID,
+            uuid: "00000000-0000-4000-8000-000000000422",
+            toolUseId: "toolu-usage-bash",
+          }),
+          makeSubagentTaskStartedFrame({
+            taskId: TASK_ID,
+            toolUseId: TOOL_USE_ID,
+            uuid: "00000000-0000-4000-8000-000000000423",
+          }),
+          ...makeSubagentAssistantFrames({
+            parentToolUseId: TOOL_USE_ID,
+            uuid: "00000000-0000-4000-8000-000000000424",
+            text: "Done.",
+            usage: {
+              input_tokens: 3,
+              cache_creation_input_tokens: null,
+              cache_read_input_tokens: 200,
+              output_tokens: 11,
+            },
+          }),
+          makeSubagentNotificationFrame({
+            taskId: TASK_ID,
+            toolUseId: TOOL_USE_ID,
+            summary: "Done.",
+            uuid: "00000000-0000-4000-8000-000000000425",
+          }),
+          makeResultFrame({
+            uuid: "00000000-0000-4000-8000-000000000426",
+            result: "The auditor finished.",
+          }),
+        ];
+        for (const frame of frames) {
+          yield* Queue.offer(harness.sdkMessages, frame);
+        }
+        yield* awaitUntil(() => harness.terminalEvents().length === 1, "turn terminal");
+
+        const updates = harness.events.filter(
+          (event): event is Extract<ProviderAdapterV2Event, { type: "subagent.updated" }> =>
+            event.type === "subagent.updated",
+        );
+        assert.isUndefined(
+          updates.find((update) => update.subagent.status === "running")?.subagent.tokenUsage,
+        );
+        assert.deepEqual(updates.at(-1)?.subagent.status, "completed");
+        assert.deepEqual(updates.at(-1)?.subagent.tokenUsage, {
+          inputTokens: 10 + 5 + 100 + 3 + 200,
+          cachedInputTokens: 300,
+          outputTokens: 18,
+        });
       }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
     ),
   );

@@ -2,12 +2,23 @@ import * as React from "react";
 
 import { cn } from "~/lib/utils";
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+function Table({
+  className,
+  variant = "default",
+  ...props
+}: React.ComponentProps<"table"> & {
+  /** `grid` rules a line between columns, for dense tables of numbers. */
+  variant?: "default" | "grid";
+}) {
   return (
     <div data-slot="table-container" className="relative w-full overflow-x-auto">
       <table
         data-slot="table"
-        className={cn("w-full caption-bottom text-xs", className)}
+        className={cn(
+          "w-full caption-bottom text-xs",
+          variant === "grid" && "[&_td+td]:border-l [&_th+th]:border-l",
+          className,
+        )}
         {...props}
       />
     </div>

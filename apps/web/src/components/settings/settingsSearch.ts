@@ -18,6 +18,7 @@ export type SettingsPath =
   | "/settings/keybindings"
   | "/settings/snap-shot"
   | "/settings/providers"
+  | "/settings/skill-monitor"
   | "/settings/integrations"
   | "/settings/scheduled-tasks"
   | "/settings/source-control"
@@ -90,6 +91,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/keybindings": "Keybindings",
   "/settings/snap-shot": "SnapShots",
   "/settings/providers": "Providers",
+  "/settings/skill-monitor": "Skill Monitor",
   "/settings/integrations": "Integrations",
   "/settings/scheduled-tasks": "Scheduled Tasks",
   "/settings/source-control": "Source Control",
@@ -383,6 +385,24 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Show skills in slash menu",
     to: "/settings/general",
     searchTerms: ["command menu dollar $ slash /"],
+  },
+  {
+    id: "skill-monitor-averages",
+    title: "Tokens Used",
+    to: "/settings/skill-monitor",
+    searchTerms: ["skill monitor usage tokens cached input output average metrics"],
+  },
+  {
+    id: "skill-monitor-time",
+    title: "Time Spent",
+    to: "/settings/skill-monitor",
+    searchTerms: ["skill monitor runtime duration model tools waiting slowest command tool"],
+  },
+  {
+    id: "skill-monitor-usage-windows",
+    title: "Skill Monitor usage windows",
+    to: "/settings/skill-monitor",
+    searchTerms: ["skill usage count days recent invocations runs"],
   },
   {
     id: "composer-rich-text",
@@ -883,6 +903,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/general": null,
   "/settings/appearance": null,
   "/settings/snap-shot": null,
+  "/settings/skill-monitor": null,
   // Keybindings fan out to the selection; Providers shows the representative
   // environment at any selection. Neither needs a particular scope to render.
   "/settings/keybindings": null,

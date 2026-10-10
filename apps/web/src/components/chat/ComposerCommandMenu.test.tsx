@@ -85,7 +85,7 @@ describe("ComposerCommandMenu", () => {
 
     expect(markup).toContain("Browser");
     expect(markup).toContain('data-slot="badge"');
-    expect(markup).toContain(">App Skill</span>");
+    expect(markup).toContain(">App</span>");
     expect(markup).toContain("Open and control the in-app browser");
     expect(markup).toContain("<svg");
   });

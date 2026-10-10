@@ -124,3 +124,25 @@ export function resolveProviderSlashCommandsForCwd(
 ): ServerProvider["slashCommands"] {
   return resolveProviderWorkspaceSnapshot(provider, cwd)?.slashCommands ?? provider.slashCommands;
 }
+
+/** Rough tokens per character for prose and paths; providers do not report the real count. */
+const CHARACTERS_PER_TOKEN = 4;
+
+/**
+ * Estimated tokens a skill adds to every new session: the line its provider
+ * injects so the model knows the skill exists (name and description, and the
+ * path for Codex). The body only costs tokens once the skill runs. A skill
+ * that is switched off, or hidden from the agent, adds nothing.
+ */
+export function estimateSkillAmbientTokens(
+  skill: Pick<
+    ServerProviderSkill,
+    "name" | "description" | "shortDescription" | "path" | "enabled" | "userInvocationOnly"
+  >,
+  driver: string,
+): number {
+  if (!skill.enabled || skill.userInvocationOnly === true) return 0;
+  const description = skill.description ?? skill.shortDescription ?? "";
+  const path = driver === "codex" ? ` (file: ${skill.path})` : "";
+  return Math.ceil(`- ${skill.name}: ${description}${path}`.length / CHARACTERS_PER_TOKEN);
+}

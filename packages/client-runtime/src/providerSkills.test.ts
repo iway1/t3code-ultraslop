@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   dedupeProviderSkillsByName,
+  estimateSkillAmbientTokens,
   formatProviderSkillDisplayName,
   getProviderSlashCommandsForSlashMenu,
   getProviderSkillsForSlashMenu,
@@ -250,5 +251,26 @@ describe("workspace provider snapshots", () => {
   it("keeps the machine snapshot before this cwd has a provider snapshot", () => {
     expect(resolveProviderSkillsForCwd(provider, "/workspace/project-b")).toEqual(provider.skills);
     expect(resolveProviderSlashCommandsForCwd(provider, null)).toEqual(provider.slashCommands);
+  });
+});
+
+describe("estimateSkillAmbientTokens", () => {
+  const skill = {
+    name: "review",
+    description: "Review the current diff for bugs.",
+    path: "/repo/.agents/skills/review/SKILL.md",
+    enabled: true,
+  };
+
+  it("counts the line that tells the model the skill exists", () => {
+    // "- review: Review the current diff for bugs." is 43 characters.
+    expect(estimateSkillAmbientTokens(skill, "claudeAgent")).toBe(11);
+    // Codex also lists the path: 43 + 45 characters.
+    expect(estimateSkillAmbientTokens(skill, "codex")).toBe(22);
+  });
+
+  it("costs nothing for a skill the agent cannot see", () => {
+    expect(estimateSkillAmbientTokens({ ...skill, enabled: false }, "codex")).toBe(0);
+    expect(estimateSkillAmbientTokens({ ...skill, userInvocationOnly: true }, "codex")).toBe(0);
   });
 });

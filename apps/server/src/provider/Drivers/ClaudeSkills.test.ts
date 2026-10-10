@@ -5,7 +5,11 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
-import { discoverClaudeSkills, skillOverrideSettingsPaths } from "./ClaudeSkills.ts";
+import {
+  discoverClaudeSkills,
+  setClaudeSkillEnabled,
+  skillOverrideSettingsPaths,
+} from "./ClaudeSkills.ts";
 
 const writeSkill = Effect.fn(function* (
   skillsDir: string,
@@ -684,6 +688,73 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
       );
 
       assert.deepEqual(skills, []);
+    }),
+  );
+});
+
+it.layer(NodeServices.layer)("setClaudeSkillEnabled", (it) => {
+  const toggle = (configDir: string, name: string, enabled: boolean) =>
+    setClaudeSkillEnabled({ config: { homePath: configDir }, environment: {}, name, enabled });
+
+  it.effect("switches a skill off and on in the user settings, keeping the rest", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const configDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-toggle-" });
+      const settingsPath = path.join(configDir, "settings.json");
+      yield* fs.writeFileString(
+        settingsPath,
+        '{"model":"opus","skillOverrides":{"lint":"name-only"}}',
+      );
+
+      yield* toggle(configDir, "review", false);
+      assert.strictEqual(
+        yield* fs.readFileString(settingsPath),
+        [
+          "{",
+          '  "model": "opus",',
+          '  "skillOverrides": {',
+          '    "lint": "name-only",',
+          '    "review": "off"',
+          "  }",
+          "}",
+          "",
+        ].join("\n"),
+      );
+
+      // Turning skills back on removes their entries, then the emptied map.
+      yield* toggle(configDir, "review", true);
+      yield* toggle(configDir, "lint", true);
+      assert.strictEqual(yield* fs.readFileString(settingsPath), '{\n  "model": "opus"\n}\n');
+    }),
+  );
+
+  it.effect("creates the user settings file when there is none", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const configDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-toggle-" });
+
+      yield* toggle(configDir, "review", false);
+      assert.strictEqual(
+        yield* fs.readFileString(path.join(configDir, "settings.json")),
+        '{\n  "skillOverrides": {\n    "review": "off"\n  }\n}\n',
+      );
+    }),
+  );
+
+  it.effect("leaves a settings file with comments for the user to edit", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const configDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-toggle-" });
+      const settingsPath = path.join(configDir, "settings.json");
+      const original = '{\n  // my model\n  "model": "opus"\n}\n';
+      yield* fs.writeFileString(settingsPath, original);
+
+      const error = yield* Effect.flip(toggle(configDir, "review", false));
+      assert.match(error.detail, /not plain JSON/);
+      assert.strictEqual(yield* fs.readFileString(settingsPath), original);
     }),
   );
 });

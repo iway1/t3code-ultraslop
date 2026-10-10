@@ -58,6 +58,7 @@ import {
   type OrchestrationV2RuntimeRequest,
   type OrchestrationV2UserInputQuestion,
   type OrchestrationV2Subagent,
+  type OrchestrationV2SubagentTokenUsage,
   type OrchestrationV2TurnItem,
   type OrchestrationV2WebSearchResult,
   type ProviderApprovalDecision,
@@ -171,6 +172,24 @@ export function claudeProviderTurnTokenUsage(
     reasoningOutputTokens: 0,
     updatedAt,
   };
+}
+
+type ClaudeCallUsage = Parameters<typeof claudeProviderTurnTokenUsage>[0];
+
+/** A subagent's total over its model calls, input counting cache reads and writes. */
+export function sumClaudeCallTokenUsage(
+  calls: Iterable<ClaudeCallUsage>,
+): OrchestrationV2SubagentTokenUsage {
+  let inputTokens = 0;
+  let cachedInputTokens = 0;
+  let outputTokens = 0;
+  for (const usage of calls) {
+    const cached = usage.cache_read_input_tokens ?? 0;
+    inputTokens += usage.input_tokens + (usage.cache_creation_input_tokens ?? 0) + cached;
+    cachedInputTokens += cached;
+    outputTokens += usage.output_tokens;
+  }
+  return { inputTokens, cachedInputTokens, outputTokens };
 }
 export const CLAUDE_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(CLAUDE_PROVIDER);
 const DEFAULT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({});
@@ -3044,6 +3063,10 @@ export function makeClaudeAdapterV2(
         // the turn that launched the subagent (wake drain, later turns) resolve
         // their subagent through this index into sessionSubagentsByTaskId.
         const sessionSubagentTaskIdsByToolUseId = yield* Ref.make(new Map<string, string>());
+        // Each subagent's model-call usage by message id, for its terminal
+        // update. The SDK repeats a call's usage on every content block it
+        // streams, so the last snapshot of each call wins.
+        const subagentCallUsageByTaskId = new Map<string, Map<string, ClaudeCallUsage>>();
         // Subagent frames can precede the task_started that registers their
         // subagent (the same race rememberPendingClaudeSubagentLaunch covers).
         // They wait here and replay once task_started registers the owner.
@@ -4086,6 +4109,13 @@ export function makeClaudeAdapterV2(
             ...(input.model === undefined ? {} : { model: input.model }),
             ...(input.progress === undefined ? {} : { progress: input.progress }),
             ...(input.result === undefined ? {} : { result: input.result }),
+            ...(input.status === "running" || !subagentCallUsageByTaskId.has(input.taskId)
+              ? {}
+              : {
+                  tokenUsage: sumClaudeCallTokenUsage(
+                    subagentCallUsageByTaskId.get(input.taskId)?.values() ?? [],
+                  ),
+                }),
             ...(isReopen ? { startedAt: now } : {}),
             completedAt: input.status === "running" ? null : (priorTask?.completedAt ?? now),
             updatedAt: now,
@@ -5804,10 +5834,11 @@ export function makeClaudeAdapterV2(
           }
 
           const frameParentToolUseId = parentToolUseIdFromSdkMessage(message);
-          if (
-            frameParentToolUseId !== null &&
-            (yield* resolveSubagentByToolUseId(context, frameParentToolUseId)) === undefined
-          ) {
+          const frameOwner =
+            frameParentToolUseId === null
+              ? undefined
+              : yield* resolveSubagentByToolUseId(context, frameParentToolUseId);
+          if (frameParentToolUseId !== null && frameOwner === undefined) {
             // Owner not registered yet: hold the frame rather than letting its
             // text and tools fall back to the parent thread.
             const droppedToolUseId = yield* Ref.modify(
@@ -5833,6 +5864,17 @@ export function makeClaudeAdapterV2(
               });
             }
             return;
+          }
+
+          if (
+            message.type === "assistant" &&
+            frameOwner !== undefined &&
+            message.message.usage !== undefined
+          ) {
+            const taskId = frameOwner.task.nativeTaskRef?.nativeId ?? String(frameOwner.task.id);
+            const calls = subagentCallUsageByTaskId.get(taskId) ?? new Map();
+            calls.set(message.message.id, message.message.usage);
+            subagentCallUsageByTaskId.set(taskId, calls);
           }
 
           if (isClaudeBackgroundTasksChangedMessage(message)) {

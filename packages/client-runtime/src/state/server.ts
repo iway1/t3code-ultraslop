@@ -1089,6 +1089,11 @@ export function createServerEnvironmentAtoms<R, E>(
       staleTimeMs: 60_000,
       refreshTrigger: ({ environmentId }) => usageScanSettingsAtom(environmentId),
     }),
+    skillUsageSummary: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:skill-usage-summary",
+      tag: WS_METHODS.serverGetSkillUsageSummary,
+      staleTimeMs: 30_000,
+    }),
     resourceTelemetry: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:resource-telemetry",
       tag: WS_METHODS.subscribeResourceTelemetry,
@@ -1143,6 +1148,15 @@ export function createServerEnvironmentAtoms<R, E>(
             input.fresh ?? false,
             input.refreshModels ?? false,
           ]),
+      },
+    }),
+    setSkillEnabled: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:set-skill-enabled",
+      tag: WS_METHODS.serverSetSkillEnabled,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.instanceId, input.skillName]),
       },
     }),
     updateProvider: createEnvironmentRpcCommand(runtime, {

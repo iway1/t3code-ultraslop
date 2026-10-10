@@ -28,6 +28,7 @@ import {
   type ProviderInstanceId,
   type ServerProvider,
   type ServerProviderUpdateState,
+  SkillToggleError,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -314,13 +315,18 @@ const snapshotInstanceKey = (provider: ServerProvider): ProviderInstanceId => {
 // after `ProviderInstanceRegistry` rebuilds an instance (e.g. because
 // its settings changed), a fresh source rides the new PubSub instead
 // of a closed one.
-const buildSnapshotSource = (instance: ProviderInstance): ProviderSnapshotSource => ({
-  instanceId: instance.instanceId,
-  driverKind: instance.driverKind,
-  getSnapshot: instance.snapshot.getSnapshot,
-  refresh: instance.snapshot.refresh,
-  streamChanges: instance.snapshot.streamChanges,
-});
+const buildSnapshotSource = (instance: ProviderInstance): ProviderSnapshotSource => {
+  // Clients only offer the skill toggle on snapshots that advertise it.
+  const advertise = (snapshot: ServerProvider): ServerProvider =>
+    instance.setSkillEnabled === undefined ? snapshot : { ...snapshot, skillToggle: true };
+  return {
+    instanceId: instance.instanceId,
+    driverKind: instance.driverKind,
+    getSnapshot: instance.snapshot.getSnapshot.pipe(Effect.map(advertise)),
+    refresh: instance.snapshot.refresh.pipe(Effect.map(advertise)),
+    streamChanges: instance.snapshot.streamChanges.pipe(Stream.map(advertise)),
+  };
+};
 
 export const ProviderRegistryLive = Layer.effect(
   ProviderRegistry.ProviderRegistry,
@@ -975,6 +981,35 @@ export const ProviderRegistryLive = Layer.effect(
       );
     });
 
+    const setSkillEnabled: ProviderRegistry.ProviderRegistryShape["setSkillEnabled"] = (input) =>
+      Effect.gen(function* () {
+        // The skill comes from this server's own list, never a client path.
+        const provider = (yield* Ref.get(providersRef)).find(
+          (candidate) => candidate.instanceId === input.instanceId,
+        );
+        const skill = (
+          provider?.workspaceSnapshots?.find((snapshot) => snapshot.cwd === input.cwd)?.skills ??
+          provider?.skills
+        )?.find((candidate) => candidate.name === input.skillName);
+        if (skill === undefined) {
+          return yield* new SkillToggleError({ detail: `No skill named ${input.skillName}.` });
+        }
+        const instance = yield* instanceRegistry.getInstance(input.instanceId);
+        if (!instance?.setSkillEnabled) {
+          return yield* new SkillToggleError({
+            detail: "This provider cannot switch skills on and off.",
+          });
+        }
+        yield* instance
+          .setSkillEnabled({ cwd: input.cwd, skill, enabled: input.enabled })
+          .pipe(Effect.mapError((cause) => new SkillToggleError({ detail: cause.detail, cause })));
+        return yield* refreshWorkspaceSnapshot({
+          instanceId: input.instanceId,
+          cwd: input.cwd,
+          fresh: true,
+        }).pipe(Effect.catchCause(recoverRefreshFailure));
+      });
+
     return {
       getProviders: Ref.get(providersRef),
       refresh: (provider?: ProviderDriverKind) =>
@@ -983,6 +1018,7 @@ export const ProviderRegistryLive = Layer.effect(
         refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
       refreshWorkspaceSnapshot: (input) =>
         refreshWorkspaceSnapshot(input).pipe(Effect.catchCause(recoverRefreshFailure)),
+      setSkillEnabled,
       getProviderMaintenanceCapabilitiesForInstance,
       setProviderMaintenanceActionState,
       get streamChanges() {

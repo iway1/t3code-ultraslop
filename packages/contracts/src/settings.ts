@@ -38,6 +38,7 @@ import {
   type ProviderDriverKind,
 } from "./providerInstance.ts";
 import { PullRequestMergeMethod } from "./pullRequest.ts";
+import { MAX_SKILL_USAGE_WINDOWS, SkillUsageWindowDays } from "./skillUsage.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -292,6 +293,26 @@ export const DiffColorScheme = Schema.Literals(["red-green", "blue-orange"]);
 export const ChatWidth = Schema.Literals(["comfortable", "wide", "full"]);
 export type ChatWidth = typeof ChatWidth.Type;
 
+/** What the Skill Monitor shows under each skill. The defaults are its original layout. */
+const SkillMonitorSettingsFields = Schema.Struct({
+  showAmbientTokens: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  showAverageCachedTokens: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  showAverageInputTokens: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  showAverageOutputTokens: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  showAverageTotalTime: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  showAverageModelTime: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  showAverageToolTime: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  showAverageWaitingTime: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  showSlowestTool: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  usageWindowsDays: Schema.Array(SkillUsageWindowDays)
+    .check(Schema.isMaxLength(MAX_SKILL_USAGE_WINDOWS))
+    .pipe(Schema.withDecodingDefault(Effect.succeed([7]))),
+});
+export const SkillMonitorSettings = SkillMonitorSettingsFields.pipe(
+  Schema.withDecodingDefault(Effect.succeed({})),
+);
+export type SkillMonitorSettings = typeof SkillMonitorSettings.Type;
+
 export const ClientSettingsSchema = Schema.Struct({
   notificationMode: NotificationMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("off" as const)),
@@ -455,6 +476,7 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   proactivePanelsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   showSkillsInSlashMenu: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  skillMonitor: SkillMonitorSettings,
   // Legacy sidebar (the original per-project tree). Deliberately a fresh key
   // (was `sidebarV2Enabled` + `sidebarV2ConfiguredByUser`): decoding drops the
   // old keys, so everyone, including prior beta opt-outs, resets to the new
@@ -1785,6 +1807,9 @@ export const ClientSettingsPatch = Schema.Struct({
   followUpBehavior: Schema.optionalKey(Schema.Literals(["queue", "steer"])),
   proactivePanelsEnabled: Schema.optionalKey(Schema.Boolean),
   showSkillsInSlashMenu: Schema.optionalKey(Schema.Boolean),
+  // Without the struct default, an omitted key stays omitted rather than
+  // resetting the stored value.
+  skillMonitor: Schema.optionalKey(SkillMonitorSettingsFields),
   legacySidebarEnabled: Schema.optionalKey(Schema.Boolean),
   sidebarWorkingShelfEnabled: Schema.optionalKey(Schema.Boolean),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),

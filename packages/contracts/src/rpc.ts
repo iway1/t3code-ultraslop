@@ -302,6 +302,13 @@ import {
   ProviderConsumeResetCreditResult,
 } from "./providerUsageLimits.ts";
 import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
+import {
+  SetSkillEnabledInput,
+  SkillToggleError,
+  SkillUsageReadError,
+  SkillUsageSummary,
+  SkillUsageSummaryInput,
+} from "./skillUsage.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   ScheduledTaskDeleteInput,
@@ -465,6 +472,8 @@ export const WS_METHODS = {
   serverReportHostPowerState: "server.reportHostPowerState",
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
   serverGetUsageSummary: "server.getUsageSummary",
+  serverGetSkillUsageSummary: "server.getSkillUsageSummary",
+  serverSetSkillEnabled: "server.setSkillEnabled",
   serverRefreshUsageRates: "server.refreshUsageRates",
 
   // Scheduled tasks
@@ -834,6 +843,18 @@ const WsServerGetUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetUsageSummary, {
   payload: UsageSummaryInput,
   success: UsageSummary,
   error: Schema.Union([EnvironmentAuthorizationError, UsageReadError]),
+});
+
+const WsServerSetSkillEnabledRpc = Rpc.make(WS_METHODS.serverSetSkillEnabled, {
+  payload: SetSkillEnabledInput,
+  success: ServerProviderUpdatedPayload,
+  error: Schema.Union([EnvironmentAuthorizationError, SkillToggleError]),
+});
+
+const WsServerGetSkillUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetSkillUsageSummary, {
+  payload: SkillUsageSummaryInput,
+  success: SkillUsageSummary,
+  error: Schema.Union([EnvironmentAuthorizationError, SkillUsageReadError]),
 });
 
 /**
@@ -1739,6 +1760,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetResourceTelemetryHistoryRpc,
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
+  WsServerGetSkillUsageSummaryRpc,
+  WsServerSetSkillEnabledRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
   WsScheduledTasksListRpc,

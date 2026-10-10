@@ -31,6 +31,7 @@ import type {
   ProviderInstanceEnvironment,
   ProviderInstanceId,
   ServerProvider,
+  ServerProviderSkill,
 } from "@t3tools/contracts";
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
@@ -80,6 +81,16 @@ export interface ProviderInstance {
   readonly refreshModels?: () => Effect.Effect<void, ProviderDriverError>;
   /** Invalidate T3-owned discovery caches before an explicit provider refresh. */
   readonly invalidateCaches?: Effect.Effect<void>;
+  /**
+   * Switch a skill on or off in the provider's own user-wide config, so the
+   * CLI honors it in every project from its next session. Absent on drivers
+   * that have no such setting.
+   */
+  readonly setSkillEnabled?: (input: {
+    readonly cwd: string;
+    readonly skill: ServerProviderSkill;
+    readonly enabled: boolean;
+  }) => Effect.Effect<void, ProviderDriverError>;
   /**
    * Redeem one banked rate-limit reset credit on the signed-in account, then
    * re-probe so the snapshot reflects the cleared windows. Account-level,

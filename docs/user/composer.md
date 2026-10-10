@@ -183,6 +183,24 @@ provider. On mobile, both are also available before starting a thread on
 The slash menu also includes skills unless you turn off **Settings → General →
 Show skills in slash menu**. Only skills enabled for the provider are listed.
 
+On web and desktop, choose **Skill Monitor** in the right panel or the command
+palette to see your skills in a table. Click a column to sort by it, and a
+skill's name to open its instructions; hover the name for its description.
+
+- The top line estimates the tokens your skills add to every new session, since
+  the provider lists each skill's name and description so the agent knows it
+  exists. Each row shows its own share.
+- If Claude Code or Codex is installed, it gets a column of switches that turn
+  a skill on or off in that harness's own settings, for every project. A change
+  applies from the next agent session.
+- A skill that has run shows how often it ran, its average tokens per run, and
+  how its time split between the model, tool calls, and waiting on you, with
+  the tool that took longest. These cover the whole turn the skill ran in and
+  any subagents that turn started.
+
+Choose the columns in **Settings → Skill Monitor**, or from the cog at the top
+of the panel. Usage is kept on the machine that ran the agent.
+
 After you add or change skills, plugins, or MCP servers, use **Restart agent
 session** in the command palette on web and desktop. The conversation continues,
 and your next message starts the agent again with the new setup.

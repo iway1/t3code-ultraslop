@@ -46,6 +46,7 @@ import {
   checkCodexProviderStatus,
   makePendingCodexProvider,
   probeCodexSkillsForCwd,
+  setCodexSkillEnabled,
   withCodexAppServerClient,
 } from "../Layers/CodexProvider.ts";
 import { resolveCodexLaunchArgs } from "../Layers/codexLaunchArgs.ts";
@@ -366,6 +367,34 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
             ),
           );
 
+      const setSkillEnabled: NonNullable<ProviderInstance["setSkillEnabled"]> = ({
+        cwd,
+        skill,
+        enabled: skillEnabled,
+      }) =>
+        setCodexSkillEnabled({
+          binaryPath: effectiveConfig.binaryPath,
+          homePath: effectiveConfig.homePath,
+          launchArgs: resolveCodexLaunchArgs(effectiveConfig.launchArgs, processEnv),
+          cwd,
+          environment: processEnv,
+          path: skill.path,
+          enabled: skillEnabled,
+        }).pipe(
+          Effect.scoped,
+          Effect.timeout("20 seconds"),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.mapError(
+            (cause) =>
+              new ProviderDriverError({
+                driver: DRIVER_KIND,
+                instanceId,
+                detail: "Codex could not change the skill setting.",
+                cause,
+              }),
+          ),
+        );
+
       return {
         instanceId,
         driverKind: DRIVER_KIND,
@@ -375,6 +404,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         enabled,
         snapshot,
         snapshotForCwd,
+        setSkillEnabled,
         consumeResetCredit,
         orchestrationAdapter,
         textGeneration,

@@ -13,6 +13,7 @@ import {
   checkCodexProviderStatus,
   makePendingCodexProvider,
   probeCodexSkillsForCwd,
+  setCodexSkillEnabled,
 } from "../Layers/CodexProvider.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
@@ -289,5 +290,30 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
             Effect.catch(() => snapshot.getSnapshot),
           )
         : snapshot.getSnapshot,
+    setSkillEnabled: ({ cwd, skill, enabled }) =>
+      resolveRuntime.pipe(
+        Effect.flatMap((effective) =>
+          setCodexSkillEnabled({
+            binaryPath: effective.config.binaryPath,
+            homePath: effective.config.homePath,
+            launchArgs: effective.config.launchArgs,
+            cwd,
+            environment: effective.environment,
+            path: skill.path,
+            enabled,
+          }),
+        ),
+        Effect.scoped,
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER,
+              instanceId,
+              detail: "Codex could not change the skill setting.",
+              cause,
+            }),
+        ),
+      ),
   } satisfies ProviderInstance;
 });

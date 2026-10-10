@@ -493,6 +493,20 @@ export const probeCodexSkillsForCwd = Effect.fn("probeCodexSkillsForCwd")(functi
   return parseCodexSkillsListResponse(skillsResponse, input.cwd);
 });
 
+/** Switch a skill on or off in the user's Codex config, by the path Codex listed it under. */
+export const setCodexSkillEnabled = Effect.fn("setCodexSkillEnabled")(function* (input: {
+  readonly binaryPath: string;
+  readonly homePath?: string;
+  readonly launchArgs?: string;
+  readonly cwd: string;
+  readonly environment?: NodeJS.ProcessEnv;
+  readonly path: string;
+  readonly enabled: boolean;
+}) {
+  const { client } = yield* withCodexAppServerClient(input);
+  yield* client.request("skills/config/write", { path: input.path, enabled: input.enabled });
+});
+
 const emptyCodexModelsFromSettings = (codexSettings: CodexSettings): ServerProvider["models"] =>
   appendCustomCodexModels([], codexSettings.customModels);
 
