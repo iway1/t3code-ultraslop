@@ -295,10 +295,14 @@ function parseCodexSkillsListResponse(
   cwd: string,
 ): ReadonlyArray<ServerProviderSkill> {
   const matchingEntry = response.data.find((entry) => entry.cwd === cwd);
-  const skills = matchingEntry
-    ? matchingEntry.skills
-    : response.data.flatMap((entry) => entry.skills);
+  return parseCodexSkills(
+    matchingEntry ? matchingEntry.skills : response.data.flatMap((entry) => entry.skills),
+  );
+}
 
+function parseCodexSkills(
+  skills: CodexSchema.V2SkillsListResponse["data"][number]["skills"],
+): ReadonlyArray<ServerProviderSkill> {
   return skills.map((skill) => {
     const shortDescription =
       skill.shortDescription ?? skill.interface?.shortDescription ?? undefined;
@@ -493,19 +497,55 @@ export const probeCodexSkillsForCwd = Effect.fn("probeCodexSkillsForCwd")(functi
   return parseCodexSkillsListResponse(skillsResponse, input.cwd);
 });
 
-/** Switch a skill on or off in the user's Codex config, by the path Codex listed it under. */
+/**
+ * Switch every skill called `name` on or off in the user's Codex config, then
+ * list the skills of `cwds` from the same app-server, which already reflects
+ * the write. A cwd Codex does not answer for is left out of the result.
+ */
 export const setCodexSkillEnabled = Effect.fn("setCodexSkillEnabled")(function* (input: {
   readonly binaryPath: string;
   readonly homePath?: string;
   readonly launchArgs?: string;
   readonly cwd: string;
   readonly environment?: NodeJS.ProcessEnv;
-  readonly path: string;
+  readonly name: string;
   readonly enabled: boolean;
+  readonly cwds: ReadonlyArray<string>;
 }) {
   const { client } = yield* withCodexAppServerClient(input);
-  yield* client.request("skills/config/write", { path: input.path, enabled: input.enabled });
+  yield* client.request("skills/config/write", { name: input.name, enabled: input.enabled });
+  return yield* listCodexSkills(client, input.cwds);
 });
+
+/** The skills of every cwd from one app-server; switched-off skills included. */
+export const listCodexSkillsForCwds = Effect.fn("listCodexSkillsForCwds")(function* (input: {
+  readonly binaryPath: string;
+  readonly homePath?: string;
+  readonly launchArgs?: string;
+  readonly cwds: ReadonlyArray<string>;
+  readonly environment?: NodeJS.ProcessEnv;
+}) {
+  const [cwd] = input.cwds;
+  if (cwd === undefined) return new Map<string, ReadonlyArray<ServerProviderSkill>>();
+  const { client } = yield* withCodexAppServerClient({ ...input, cwd });
+  return yield* listCodexSkills(client, input.cwds);
+});
+
+const listCodexSkills = (
+  client: Effect.Success<ReturnType<typeof withCodexAppServerClient>>["client"],
+  cwds: ReadonlyArray<string>,
+) =>
+  client.request("skills/list", { cwds, forceReload: true }).pipe(
+    Effect.map(
+      (response) =>
+        new Map(
+          cwds.flatMap((cwd) => {
+            const entry = response.data.find((candidate) => candidate.cwd === cwd);
+            return entry === undefined ? [] : [[cwd, parseCodexSkills(entry.skills)] as const];
+          }),
+        ),
+    ),
+  );
 
 const emptyCodexModelsFromSettings = (codexSettings: CodexSettings): ServerProvider["models"] =>
   appendCustomCodexModels([], codexSettings.customModels);

@@ -147,10 +147,22 @@ const decodeCachedSources = Schema.decodeUnknownOption(
   Schema.Struct({ sources: Schema.Record(Schema.String, CachedSource) }),
 );
 
+/**
+ * Narrows a scan to some providers, for server callers that need only their
+ * spend. Sources of other providers are not read, so their files, databases,
+ * and account requests are skipped.
+ */
+export interface UsageScanOptions {
+  readonly providers: ReadonlyArray<UsageProviderKind>;
+}
+
 export class UsageService extends Context.Service<
   UsageService,
   {
-    readonly readSummary: (input: UsageSummaryInput) => Effect.Effect<UsageSummary, UsageReadError>;
+    readonly readSummary: (
+      input: UsageSummaryInput,
+      options?: UsageScanOptions,
+    ) => Effect.Effect<UsageSummary, UsageReadError>;
     /** Refetches the rate table ahead of its TTL. See `ensureRates`. */
     readonly refreshRates: Effect.Effect<UsagePricing>;
   }
@@ -538,7 +550,10 @@ export const make = Effect.gen(function* () {
     windowStartMs: number,
     settings: ServerSettingsValue,
     retentionCutoffMs: number,
+    options: UsageScanOptions | undefined,
   ) {
+    const wants = (provider: UsageProviderKind) =>
+      options === undefined || options.providers.includes(provider);
     // The home resolvers ask for `Path` themselves; satisfy them from the
     // instance we already hold so the scan stays context-free.
     const dirs = yield* resolveTranscriptDirs(settings, retentionCutoffMs).pipe(
@@ -546,6 +561,7 @@ export const make = Effect.gen(function* () {
     );
     const scanned: ScannedDir[] = [];
     for (const { provider, dir, volumeId, fileName } of dirs) {
+      if (!wants(provider)) continue;
       const exists = yield* fileSystem
         .exists(dir)
         .pipe(Effect.catchCause(() => Effect.succeed(false)));
@@ -600,79 +616,86 @@ export const make = Effect.gen(function* () {
       }
       return [...canonical];
     });
-    const dataHome = hostEnvironment["XDG_DATA_HOME"]?.trim();
-    for (const dir of yield* envRoots("OPENCODE_DATA_DIR", [
-      path.join(
-        dataHome && path.isAbsolute(dataHome) ? dataHome : path.join(home, ".local", "share"),
-        "opencode",
-      ),
-    ])) {
-      const result = yield* Effect.promise(() => readOpenCodeUsage(dir, windowStartMs));
-      scanned.push({
-        provider: "opencode",
-        dir,
-        volumeId: yield* Effect.promise(() => readDirectoryVolumeId(dir)),
-        files: result.missing && !result.error ? null : result.files,
-        status: result.error ? "partial" : "ok",
-        ...(result.error ? { message: "Some OpenCode history could not be read." } : {}),
-      });
-    }
-    const antigravityRoots = yield* envRoots("ANTIGRAVITY_DATA_DIR", [
-      ...["antigravity", "antigravity-cli", "antigravity-ide", "antigravity-backup"].map((name) =>
-        path.join(home, ".gemini", name),
-      ),
-      path.join(home, ".config", "antigravity"),
-    ]);
-    for (const [instanceId, instance] of Object.entries(settings.providerInstances)) {
-      if (instance.driver === "antigravity") {
-        const directories = yield* resolveAntigravityInstanceDirectories(
-          config.stateDir,
-          ProviderInstanceId.make(instanceId),
-        ).pipe(
-          Effect.provideService(Crypto.Crypto, crypto),
-          Effect.provideService(Path.Path, path),
-          Effect.mapError(
-            (cause) =>
-              new UsageReadError({
-                reason: "scanFailed",
-                detail: "Antigravity profile directory could not be resolved.",
-                cause,
-              }),
-          ),
-        );
-        antigravityRoots.push(path.join(directories.profile, "antigravity-acp"));
+    if (wants("opencode")) {
+      const dataHome = hostEnvironment["XDG_DATA_HOME"]?.trim();
+      for (const dir of yield* envRoots("OPENCODE_DATA_DIR", [
+        path.join(
+          dataHome && path.isAbsolute(dataHome) ? dataHome : path.join(home, ".local", "share"),
+          "opencode",
+        ),
+      ])) {
+        const result = yield* Effect.promise(() => readOpenCodeUsage(dir, windowStartMs));
+        scanned.push({
+          provider: "opencode",
+          dir,
+          volumeId: yield* Effect.promise(() => readDirectoryVolumeId(dir)),
+          files: result.missing && !result.error ? null : result.files,
+          status: result.error ? "partial" : "ok",
+          ...(result.error ? { message: "Some OpenCode history could not be read." } : {}),
+        });
       }
     }
-    const antigravityDirs = new Set<string>();
-    for (const root of antigravityRoots) {
-      const resolvedRoot = yield* fileSystem.realPath(root).pipe(Effect.orElseSucceed(() => root));
-      const nested = path.join(resolvedRoot, "conversations");
-      const dir = (yield* fileSystem
-        .exists(nested)
-        .pipe(Effect.catchCause(() => Effect.succeed(false))))
-        ? nested
-        : resolvedRoot;
-      antigravityDirs.add(yield* fileSystem.realPath(dir).pipe(Effect.orElseSucceed(() => dir)));
-    }
-    const antigravity = yield* Effect.promise(() =>
-      readAntigravityUsage([...antigravityDirs], windowStartMs),
-    );
-    for (const dir of antigravityDirs) {
-      const exists = yield* fileSystem
-        .exists(dir)
-        .pipe(Effect.catchCause(() => Effect.succeed(false)));
-      const failed = antigravity.errors.some(
-        (error) => error === dir || error.startsWith(`${dir}${path.sep}`),
+    if (wants("antigravity")) {
+      const antigravityRoots = yield* envRoots("ANTIGRAVITY_DATA_DIR", [
+        ...["antigravity", "antigravity-cli", "antigravity-ide", "antigravity-backup"].map((name) =>
+          path.join(home, ".gemini", name),
+        ),
+        path.join(home, ".config", "antigravity"),
+      ]);
+      for (const [instanceId, instance] of Object.entries(settings.providerInstances)) {
+        if (instance.driver === "antigravity") {
+          const directories = yield* resolveAntigravityInstanceDirectories(
+            config.stateDir,
+            ProviderInstanceId.make(instanceId),
+          ).pipe(
+            Effect.provideService(Crypto.Crypto, crypto),
+            Effect.provideService(Path.Path, path),
+            Effect.mapError(
+              (cause) =>
+                new UsageReadError({
+                  reason: "scanFailed",
+                  detail: "Antigravity profile directory could not be resolved.",
+                  cause,
+                }),
+            ),
+          );
+          antigravityRoots.push(path.join(directories.profile, "antigravity-acp"));
+        }
+      }
+      const antigravityDirs = new Set<string>();
+      for (const root of antigravityRoots) {
+        const resolvedRoot = yield* fileSystem
+          .realPath(root)
+          .pipe(Effect.orElseSucceed(() => root));
+        const nested = path.join(resolvedRoot, "conversations");
+        const dir = (yield* fileSystem
+          .exists(nested)
+          .pipe(Effect.catchCause(() => Effect.succeed(false))))
+          ? nested
+          : resolvedRoot;
+        antigravityDirs.add(yield* fileSystem.realPath(dir).pipe(Effect.orElseSucceed(() => dir)));
+      }
+      const antigravity = yield* Effect.promise(() =>
+        readAntigravityUsage([...antigravityDirs], windowStartMs),
       );
-      scanned.push({
-        provider: "antigravity",
-        dir,
-        volumeId: yield* Effect.promise(() => readDirectoryVolumeId(dir)),
-        files: !exists && !failed ? null : antigravity.files.filter((file) => file.root === dir),
-        status: failed ? "partial" : "ok",
-        ...(failed ? { message: "Some Antigravity history could not be read." } : {}),
-      });
+      for (const dir of antigravityDirs) {
+        const exists = yield* fileSystem
+          .exists(dir)
+          .pipe(Effect.catchCause(() => Effect.succeed(false)));
+        const failed = antigravity.errors.some(
+          (error) => error === dir || error.startsWith(`${dir}${path.sep}`),
+        );
+        scanned.push({
+          provider: "antigravity",
+          dir,
+          volumeId: yield* Effect.promise(() => readDirectoryVolumeId(dir)),
+          files: !exists && !failed ? null : antigravity.files.filter((file) => file.root === dir),
+          status: failed ? "partial" : "ok",
+          ...(failed ? { message: "Some Antigravity history could not be read." } : {}),
+        });
+      }
     }
+    if (!wants("cursor")) return scanned;
     const cursorUserHome =
       (platform === "win32" ? hostEnvironment["USERPROFILE"] : hostEnvironment["HOME"]) || home;
     const configHome = hostEnvironment["XDG_CONFIG_HOME"]?.trim();
@@ -757,6 +780,7 @@ export const make = Effect.gen(function* () {
   const scanSummary = Effect.fn("UsageService.scanSummary")(function* (
     input: UsageSummaryInput,
     settings: ServerSettingsValue,
+    options: UsageScanOptions | undefined,
   ) {
     if (input.sinceDay > input.untilDay) {
       return yield* new UsageReadError({
@@ -809,7 +833,7 @@ export const make = Effect.gen(function* () {
     // loads while transcripts stream instead of gating them: a cold rates
     // fetch on a slow network no longer delays the scan by its own timeout.
     const [, scannedDirs] = yield* Effect.all(
-      [ensureRates(false), collectDirs(windowStartMs, settings, retentionCutoffMs)],
+      [ensureRates(false), collectDirs(windowStartMs, settings, retentionCutoffMs, options)],
       { concurrency: 2 },
     );
 
@@ -932,8 +956,13 @@ export const make = Effect.gen(function* () {
    */
   const inflightScans = new Map<string, Deferred.Deferred<UsageSummary, UsageReadError>>();
 
-  const scanKey = (input: UsageSummaryInput, settings: ServerSettingsValue): string =>
+  const scanKey = (
+    input: UsageSummaryInput,
+    settings: ServerSettingsValue,
+    options: UsageScanOptions | undefined,
+  ): string =>
     JSON.stringify([
+      options?.providers.toSorted() ?? null,
       input.timeZone,
       input.sinceDay,
       input.untilDay,
@@ -945,9 +974,12 @@ export const make = Effect.gen(function* () {
       settings.cursorKeychainUsageEnabled,
     ]);
 
-  const readSummary = Effect.fn("UsageService.readSummary")(function* (input: UsageSummaryInput) {
+  const readSummary = Effect.fn("UsageService.readSummary")(function* (
+    input: UsageSummaryInput,
+    options?: UsageScanOptions,
+  ) {
     const settings = yield* readSettings;
-    const key = scanKey(input, settings);
+    const key = scanKey(input, settings, options);
     const deferred = yield* Effect.uninterruptible(
       Effect.gen(function* () {
         const existing = inflightScans.get(key);
@@ -959,7 +991,7 @@ export const make = Effect.gen(function* () {
         inflightScans.set(key, created);
         // Detached so one departing client cannot tear the scan out from under
         // the fibers awaiting it; a finished scan warms the cache either way.
-        yield* scanSummary(input, settings).pipe(
+        yield* scanSummary(input, settings, options).pipe(
           Effect.onExit((exit) =>
             Effect.sync(() => inflightScans.delete(key)).pipe(
               Effect.andThen(Deferred.done(created, exit)),

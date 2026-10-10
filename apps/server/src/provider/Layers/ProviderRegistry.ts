@@ -981,34 +981,61 @@ export const ProviderRegistryLive = Layer.effect(
       );
     });
 
+    // One toggle at a time: each rewrites a whole settings file, so overlapping
+    // toggles would drop each other's change, and each rebuild must start from
+    // the lists the previous toggle left.
+    const skillToggleSemaphore = yield* Semaphore.make(1);
     const setSkillEnabled: ProviderRegistry.ProviderRegistryShape["setSkillEnabled"] = (input) =>
       Effect.gen(function* () {
-        // The skill comes from this server's own list, never a client path.
         const provider = (yield* Ref.get(providersRef)).find(
           (candidate) => candidate.instanceId === input.instanceId,
         );
-        const skill = (
-          provider?.workspaceSnapshots?.find((snapshot) => snapshot.cwd === input.cwd)?.skills ??
-          provider?.skills
-        )?.find((candidate) => candidate.name === input.skillName);
-        if (skill === undefined) {
-          return yield* new SkillToggleError({ detail: `No skill named ${input.skillName}.` });
-        }
+        const cached = provider?.workspaceSnapshots ?? [];
         const instance = yield* instanceRegistry.getInstance(input.instanceId);
         if (!instance?.setSkillEnabled) {
           return yield* new SkillToggleError({
             detail: "This provider cannot switch skills on and off.",
           });
         }
-        yield* instance
-          .setSkillEnabled({ cwd: input.cwd, skill, enabled: input.enabled })
+        // The setting is user-wide, so every workspace list cached for this
+        // instance may have changed. The toggle lists them all again.
+        const skillsByCwd = yield* instance
+          .setSkillEnabled({
+            cwd: input.cwd,
+            name: input.skillName,
+            enabled: input.enabled,
+            cwds: cached.map((snapshot) => snapshot.cwd),
+          })
           .pipe(Effect.mapError((cause) => new SkillToggleError({ detail: cause.detail, cause })));
-        return yield* refreshWorkspaceSnapshot({
-          instanceId: input.instanceId,
-          cwd: input.cwd,
-          fresh: true,
-        }).pipe(Effect.catchCause(recoverRefreshFailure));
-      });
+        if ((yield* instanceRegistry.getInstance(input.instanceId)) !== instance) {
+          return yield* Ref.get(providersRef);
+        }
+        // Swap only the skills, and only in lists nothing replaced while the
+        // toggle ran: a scan or session event that landed first is newer.
+        const providers = yield* updateProviders((currentProviders) =>
+          currentProviders.map((candidate) =>
+            candidate.instanceId === input.instanceId && candidate.workspaceSnapshots
+              ? {
+                  ...candidate,
+                  workspaceSnapshots: candidate.workspaceSnapshots.map((snapshot) => {
+                    const skills = skillsByCwd.get(snapshot.cwd);
+                    const before = cached.find((entry) => entry.cwd === snapshot.cwd);
+                    return skills !== undefined && Equal.equals(snapshot, before)
+                      ? { ...snapshot, skills }
+                      : snapshot;
+                  }),
+                }
+              : candidate,
+          ),
+        );
+        // A workspace with no cached list yet gets its first scan.
+        return cached.some((snapshot) => snapshot.cwd === input.cwd)
+          ? providers
+          : yield* refreshWorkspaceSnapshot({
+              instanceId: input.instanceId,
+              cwd: input.cwd,
+            }).pipe(Effect.catchCause(recoverRefreshFailure));
+      }).pipe(skillToggleSemaphore.withPermits(1));
 
     return {
       getProviders: Ref.get(providersRef),

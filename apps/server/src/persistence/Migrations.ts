@@ -72,6 +72,8 @@ import Migration0055 from "./Migrations/055_OrchestrationV2.ts";
 import Migration0056 from "./Migrations/056_RemoveRedundantProjectionIndexes.ts";
 import Migration0057 from "./Migrations/057_SkillUsage.ts";
 import Migration0058 from "./Migrations/058_SkillTiming.ts";
+import Migration0059 from "./Migrations/059_SkillTurnQuota.ts";
+import Migration0060 from "./Migrations/060_SkillInvocationModel.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -144,6 +146,8 @@ export const migrationEntries = [
   [56, "RemoveRedundantProjectionIndexes", Migration0056],
   [57, "SkillUsage", Migration0057],
   [58, "SkillTiming", Migration0058],
+  [59, "SkillTurnQuota", Migration0059],
+  [60, "SkillInvocationModel", Migration0060],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

@@ -399,10 +399,36 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["skill monitor runtime duration model tools waiting slowest command tool"],
   },
   {
+    id: "skill-monitor-usage-limits",
+    title: "Usage Limits",
+    to: "/settings/skill-monitor",
+    searchTerms: [
+      "skill monitor usage limit 5 hour session weekly percent quota plan subscription 7 days total",
+    ],
+  },
+  {
     id: "skill-monitor-usage-windows",
     title: "Skill Monitor usage windows",
     to: "/settings/skill-monitor",
     searchTerms: ["skill usage count days recent invocations runs"],
+  },
+  {
+    id: "skill-monitor-tool-columns",
+    title: "Tool columns",
+    to: "/settings/skill-monitor",
+    searchTerms: ["skill monitor command script tool columns average time per run"],
+  },
+  {
+    id: "skill-monitor-column-order",
+    title: "Skill Monitor column order",
+    to: "/settings/skill-monitor",
+    searchTerms: ["skill monitor columns reorder order arrange drag move"],
+  },
+  {
+    id: "skill-monitor-hidden-skills",
+    title: "Hidden skills",
+    to: "/settings/skill-monitor",
+    searchTerms: ["skill monitor hide hidden show unhide restore turn on enable"],
   },
   {
     id: "composer-rich-text",

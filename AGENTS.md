@@ -92,6 +92,7 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 - Refresh `statev2.sqlite`, not `state.sqlite`. The server copies the V1 `state.sqlite` only when `statev2.sqlite` is missing.
 - Bring `secrets` and `settings.json` only if the flow under test needs them.
 - Copy in, never symlink. Data flows one way: into your sandbox, never back out.
+- For Skill Monitor work, run `vp run seed-skill-monitor`. It writes a demo project with Claude Code and Codex skills under your `.t3`, adds it, and fills it with two months of skill runs. A rerun replaces the seeded runs; `--clear` removes them.
 
 ## Verifying
 

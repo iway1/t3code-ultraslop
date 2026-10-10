@@ -19,6 +19,7 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -41,6 +42,7 @@ import {
   checkClaudeProviderStatus,
   makePendingClaudeProvider,
   probeClaudeCapabilities,
+  type ClaudeCapabilitiesProbe,
 } from "../Layers/ClaudeProvider.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import * as ModelManifest from "../ModelManifest.ts";
@@ -69,11 +71,13 @@ import {
   makeClaudeContinuationGroupKey,
   resolveClaudeHomePath,
 } from "./ClaudeHome.ts";
-import { discoverClaudeSkills, setClaudeSkillEnabled } from "./ClaudeSkills.ts";
+import { discoverClaudeSkills, listClaudeSkills, setClaudeSkillEnabled } from "./ClaudeSkills.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CAPABILITIES_PROBE_TTL = Duration.minutes(5);
+/** How the CLI names a synced skill whose bare name another command owns. */
+const SYNCED_NAMESPACE = "anthropic-skills:";
 
 function isClaudeNativeCommandPath(commandPath: string): boolean {
   const normalized = normalizeCommandPath(commandPath);
@@ -194,11 +198,44 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
 
       // Per-instance capabilities cache: keyed on binary + resolved HOME so
       // account-specific probes never share auth metadata across instances.
+      // Built-in skills exist only inside the CLI, and one switched off drops
+      // out of what it reports, so every one a probe has seen is kept, with its
+      // description. Synced skills the CLI namespaced are kept the same way.
+      const knownBuiltInSkills = yield* Ref.make<ReadonlyMap<string, string | undefined>>(
+        new Map(),
+      );
+      const namespacedSyncedSkills = yield* Ref.make<ReadonlySet<string>>(new Set());
+      const rememberLoadedSkills = (probe: ClaudeCapabilitiesProbe | undefined) => {
+        const loaded = probe?.loadedSkills;
+        if (loaded === undefined) return Effect.void;
+        const descriptions = new Map(
+          probe?.slashCommands.map((command) => [command.name, command.description]),
+        );
+        return Effect.all([
+          Ref.update(knownBuiltInSkills, (known) => {
+            const next = new Map(known);
+            for (const skill of loaded) {
+              if (skill.source === "built-in") next.set(skill.name, descriptions.get(skill.name));
+            }
+            return next;
+          }),
+          Ref.update(namespacedSyncedSkills, (known) => {
+            const next = new Set(known);
+            for (const skill of loaded) {
+              if (skill.source === "syncedSkills" && skill.name.startsWith(SYNCED_NAMESPACE)) {
+                next.add(skill.name.slice(SYNCED_NAMESPACE.length));
+              }
+            }
+            return next;
+          }),
+        ]);
+      };
       const capabilitiesProbeCache = yield* Cache.make({
         capacity: 1,
         timeToLive: CAPABILITIES_PROBE_TTL,
         lookup: () =>
           probeClaudeCapabilities(effectiveConfig, processEnv, cwd).pipe(
+            Effect.tap(rememberLoadedSkills),
             Effect.provideService(Path.Path, path),
           ),
       });
@@ -358,13 +395,24 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
                 Effect.provideService(FileSystem.FileSystem, fileSystem),
                 Effect.provideService(Path.Path, path),
               ),
-        setSkillEnabled: ({ skill, enabled }) =>
+        setSkillEnabled: ({ name, enabled, cwds }) =>
           setClaudeSkillEnabled({
             config: effectiveConfig,
             environment: processEnv,
-            name: skill.name,
+            name,
             enabled,
           }).pipe(
+            Effect.andThen(
+              Effect.forEach(
+                cwds,
+                (cwd) =>
+                  discoverClaudeSkills(effectiveConfig, cwd, processEnv).pipe(
+                    Effect.map((skills) => [cwd, skills] as const),
+                  ),
+                { concurrency: "unbounded" },
+              ),
+            ),
+            Effect.map((entries) => new Map(entries)),
             Effect.provideService(FileSystem.FileSystem, fileSystem),
             Effect.provideService(Path.Path, path),
             Effect.mapError(
@@ -376,6 +424,24 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
                   cause: error,
                 }),
             ),
+          ),
+        listSkills: ({ cwds }) =>
+          Effect.all([Ref.get(knownBuiltInSkills), Ref.get(namespacedSyncedSkills)]).pipe(
+            Effect.flatMap(([builtIns, namespacedSynced]) =>
+              listClaudeSkills({
+                config: effectiveConfig,
+                cwds,
+                environment: processEnv,
+                builtIns: Array.from(builtIns, ([name, description]) => ({
+                  name,
+                  ...(description ? { description } : {}),
+                })),
+                namespacedSynced,
+              }),
+            ),
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
           ),
         orchestrationAdapter,
         textGeneration,

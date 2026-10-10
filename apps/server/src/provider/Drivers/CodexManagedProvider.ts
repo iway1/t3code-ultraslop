@@ -12,6 +12,7 @@ import { createCodexAdapterV2 } from "../../orchestration-v2/Adapters/CodexAdapt
 import {
   checkCodexProviderStatus,
   makePendingCodexProvider,
+  listCodexSkillsForCwds,
   probeCodexSkillsForCwd,
   setCodexSkillEnabled,
 } from "../Layers/CodexProvider.ts";
@@ -290,7 +291,7 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
             Effect.catch(() => snapshot.getSnapshot),
           )
         : snapshot.getSnapshot,
-    setSkillEnabled: ({ cwd, skill, enabled }) =>
+    setSkillEnabled: ({ cwd, name, enabled, cwds }) =>
       resolveRuntime.pipe(
         Effect.flatMap((effective) =>
           setCodexSkillEnabled({
@@ -299,8 +300,9 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
             launchArgs: effective.config.launchArgs,
             cwd,
             environment: effective.environment,
-            path: skill.path,
+            name,
             enabled,
+            cwds,
           }),
         ),
         Effect.scoped,
@@ -311,6 +313,29 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
               driver: DRIVER,
               instanceId,
               detail: "Codex could not change the skill setting.",
+              cause,
+            }),
+        ),
+      ),
+    listSkills: ({ cwds }) =>
+      resolveRuntime.pipe(
+        Effect.flatMap((effective) =>
+          listCodexSkillsForCwds({
+            binaryPath: effective.config.binaryPath,
+            homePath: effective.config.homePath,
+            launchArgs: effective.config.launchArgs,
+            cwds,
+            environment: effective.environment,
+          }),
+        ),
+        Effect.scoped,
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER,
+              instanceId,
+              detail: "Codex could not list its skills.",
               cause,
             }),
         ),

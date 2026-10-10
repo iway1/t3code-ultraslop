@@ -39,6 +39,8 @@ describe("V2 preview upgrade", () => {
         [56, "RemoveRedundantProjectionIndexes"],
         [57, "SkillUsage"],
         [58, "SkillTiming"],
+        [59, "SkillTurnQuota"],
+        [60, "SkillInvocationModel"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -120,6 +122,8 @@ describe("V2 preview upgrade", () => {
         [56, "RemoveRedundantProjectionIndexes"],
         [57, "SkillUsage"],
         [58, "SkillTiming"],
+        [59, "SkillTurnQuota"],
+        [60, "SkillInvocationModel"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );

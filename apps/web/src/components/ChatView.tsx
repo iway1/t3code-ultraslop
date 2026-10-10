@@ -273,6 +273,7 @@ import { PullRequestsUnavailableState } from "./pullRequest/PullRequestsUnavaila
 import { RightPanelTabs } from "./RightPanelTabs";
 import { LinkPullRequestDialogHost } from "./pullRequest/LinkPullRequestDialog";
 import { ThreadPullRequestsPanel } from "./pullRequest/ThreadPullRequestsPanel";
+import { SkillFileMetrics } from "./skills/SkillFileMetrics";
 import { SkillMonitorPanel } from "./skills/SkillMonitorPanel";
 import { useDeviceState } from "~/state/device";
 import { DeviceSetup } from "./device/DeviceSetup";
@@ -10616,6 +10617,13 @@ export default function ChatView(props: ChatViewProps) {
             pendingFileSurfaceIds.has(renderedRightPanelSurface.id)
           }
           workspaceMutationId={workspaceMutationId}
+          renderHeader={(absolutePath) => (
+            <SkillFileMetrics
+              threadRef={activeThreadRef}
+              provider={activeProviderStatus}
+              absolutePath={absolutePath}
+            />
+          )}
         />
       </Suspense>
     ) : null

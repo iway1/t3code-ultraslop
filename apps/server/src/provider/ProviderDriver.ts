@@ -32,6 +32,7 @@ import type {
   ProviderInstanceId,
   ServerProvider,
   ServerProviderSkill,
+  SkillInventorySkill,
 } from "@t3tools/contracts";
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
@@ -82,15 +83,27 @@ export interface ProviderInstance {
   /** Invalidate T3-owned discovery caches before an explicit provider refresh. */
   readonly invalidateCaches?: Effect.Effect<void>;
   /**
-   * Switch a skill on or off in the provider's own user-wide config, so the
-   * CLI honors it in every project from its next session. Absent on drivers
-   * that have no such setting.
+   * Switch every skill called `name` on or off in the provider's own
+   * user-wide config, so the CLI honors it in every project from its next
+   * session, then list the skills of `cwds` the way `snapshotForCwd` does. A
+   * cwd missing from the result was not listed. Absent on drivers that have no
+   * such setting.
    */
   readonly setSkillEnabled?: (input: {
     readonly cwd: string;
-    readonly skill: ServerProviderSkill;
+    readonly name: string;
     readonly enabled: boolean;
-  }) => Effect.Effect<void, ProviderDriverError>;
+    readonly cwds: ReadonlyArray<string>;
+  }) => Effect.Effect<ReadonlyMap<string, ReadonlyArray<ServerProviderSkill>>, ProviderDriverError>;
+  /**
+   * Every skill the provider would load in each of `cwds`, from every source
+   * it reads, including skills that are switched off. Feeds the Skill Monitor,
+   * so it must stay cheap: no model calls, and at most one short-lived process
+   * for all `cwds`. A cwd missing from the result was not listed.
+   */
+  readonly listSkills?: (input: {
+    readonly cwds: ReadonlyArray<string>;
+  }) => Effect.Effect<ReadonlyMap<string, ReadonlyArray<SkillInventorySkill>>, ProviderDriverError>;
   /**
    * Redeem one banked rate-limit reset credit on the signed-in account, then
    * re-probe so the snapshot reflects the cleared windows. Account-level,

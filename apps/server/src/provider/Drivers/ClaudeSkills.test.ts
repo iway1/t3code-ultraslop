@@ -4,9 +4,13 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import { ChildProcess } from "effect/unstable/process";
+import type { SkillInventorySkill } from "@t3tools/contracts";
 
+import { spawnAndCollect } from "../providerSnapshot.ts";
 import {
   discoverClaudeSkills,
+  listClaudeSkills,
   setClaudeSkillEnabled,
   skillOverrideSettingsPaths,
 } from "./ClaudeSkills.ts";
@@ -755,6 +759,165 @@ it.layer(NodeServices.layer)("setClaudeSkillEnabled", (it) => {
       const error = yield* Effect.flip(toggle(configDir, "review", false));
       assert.match(error.detail, /not plain JSON/);
       assert.strictEqual(yield* fs.readFileString(settingsPath), original);
+    }),
+  );
+});
+
+const writeJson = Effect.fn(function* (file: string, value: unknown) {
+  const fs = yield* FileSystem.FileSystem;
+  // Fixtures written as plain JSON, the way the CLI writes them.
+  // @effect-diagnostics-next-line preferSchemaOverJson:off
+  yield* fs.writeFileString(file, JSON.stringify(value));
+});
+
+const skill = (name: string) => ["---", `name: ${name}`, `description: ${name}.`, "---"].join("\n");
+
+const initRepository = (cwd: string) =>
+  spawnAndCollect("git", ChildProcess.make("git", ["init", "-q"], { cwd }));
+
+/** Name, scope and state of each listed skill, plus its plugin when it has one. */
+const summarize = (skills: ReadonlyArray<SkillInventorySkill> | undefined) =>
+  (skills ?? []).map(
+    (skill) =>
+      `${skill.name} ${skill.scope} ${skill.enabled ? "on" : "off"}${skill.plugin ? ` [${skill.plugin}]` : ""}`,
+  );
+
+it.layer(NodeServices.layer)("listClaudeSkills", (it) => {
+  it.effect("lists every source Claude Code reads, switched off or not", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-inventory-" });
+      const configDir = path.join(tempDir, "claude-home");
+      const outer = path.join(tempDir, "outer");
+      const repository = path.join(outer, "repo");
+      const cwd = path.join(repository, "sub", "deep");
+
+      yield* writeSkill(path.join(configDir, "skills"), "user-skill", skill("user-skill"));
+      const synced = path.join(configDir, "skills", "synced", "account");
+      yield* writeSkill(synced, "synced-skill", skill("synced-skill"));
+      yield* writeSkill(synced, "deep-research", skill("deep-research"));
+      const pluginInstall = path.join(tempDir, "plugin-install");
+      yield* writeSkill(path.join(pluginInstall, "skills"), "lint", skill("lint"));
+      yield* fs.makeDirectory(path.join(configDir, "plugins"), { recursive: true });
+      yield* writeJson(path.join(configDir, "plugins", "installed_plugins.json"), {
+        version: 2,
+        plugins: { "tools@market": [{ installPath: pluginInstall }] },
+      });
+      yield* writeJson(path.join(configDir, "settings.json"), {
+        skillOverrides: { "user-skill": "off", simplify: "off", "gone-skill": "off" },
+        enabledPlugins: { "tools@market": true },
+      });
+      // Above the repository root, so Claude Code never reaches it.
+      yield* writeSkill(path.join(outer, ".claude", "skills"), "above-root", skill("above-root"));
+      yield* fs.makeDirectory(cwd, { recursive: true });
+      yield* initRepository(repository);
+      yield* writeSkill(path.join(repository, ".claude", "skills"), "at-root", skill("at-root"));
+      yield* writeSkill(
+        path.join(repository, "sub", ".claude", "skills"),
+        "between",
+        skill("between"),
+      );
+      yield* writeSkill(
+        path.join(cwd, "packages", "foo", ".claude", "skills"),
+        "nested",
+        skill("nested"),
+      );
+
+      const listed = yield* listClaudeSkills({
+        config: { homePath: configDir },
+        cwds: [cwd],
+        environment: {},
+        builtIns: [{ name: "simplify", description: "Simplify code." }, { name: "loop" }],
+        namespacedSynced: new Set(["deep-research"]),
+      });
+
+      assert.deepStrictEqual(summarize(listed.get(cwd)), [
+        "anthropic-skills:deep-research synced on",
+        "at-root project on",
+        "between project on",
+        "gone-skill system off",
+        "loop system on",
+        "nested project on",
+        "simplify system off",
+        "synced-skill synced on",
+        "tools:lint plugin on [tools]",
+        "user-skill user off",
+      ]);
+      assert.strictEqual(
+        listed.get(cwd)?.find((entry) => entry.name === "simplify")?.description,
+        "Simplify code.",
+      );
+    }),
+  );
+
+  it.effect("lists a plugin where it is enabled, or everywhere when it is enabled nowhere", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-inventory-" });
+      const configDir = path.join(tempDir, "claude-home");
+      const enabledHere = path.join(tempDir, "enabled-here");
+      const elsewhere = path.join(tempDir, "elsewhere");
+      for (const [plugin, install] of [
+        ["scoped", path.join(tempDir, "scoped-install")],
+        ["idle", path.join(tempDir, "idle-install")],
+      ] as const) {
+        yield* writeSkill(path.join(install, "skills"), `${plugin}-skill`, skill(plugin));
+      }
+      yield* fs.makeDirectory(path.join(configDir, "plugins"), { recursive: true });
+      yield* writeJson(path.join(configDir, "plugins", "installed_plugins.json"), {
+        plugins: {
+          "scoped@market": [{ installPath: path.join(tempDir, "scoped-install") }],
+          "idle@market": [{ installPath: path.join(tempDir, "idle-install") }],
+        },
+      });
+      for (const folder of [enabledHere, elsewhere]) {
+        yield* fs.makeDirectory(path.join(folder, ".claude"), { recursive: true });
+        yield* initRepository(folder);
+      }
+      yield* writeJson(path.join(enabledHere, ".claude", "settings.json"), {
+        enabledPlugins: { "scoped@market": true },
+      });
+
+      const listed = yield* listClaudeSkills({
+        config: { homePath: configDir },
+        cwds: [enabledHere, elsewhere],
+        environment: {},
+        builtIns: [],
+        namespacedSynced: new Set(),
+      });
+
+      assert.deepStrictEqual(summarize(listed.get(enabledHere)), [
+        "idle:idle-skill plugin off [idle]",
+        "scoped:scoped-skill plugin on [scoped]",
+      ]);
+      assert.deepStrictEqual(summarize(listed.get(elsewhere)), [
+        "idle:idle-skill plugin off [idle]",
+      ]);
+    }),
+  );
+
+  it.effect("searches every folder above a workspace outside a repository", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-inventory-" });
+      const cwd = path.join(tempDir, "plain", "a", "b");
+      yield* fs.makeDirectory(cwd, { recursive: true });
+      yield* writeSkill(path.join(tempDir, "plain", ".claude", "skills"), "top", skill("top"));
+      yield* writeSkill(path.join(tempDir, "plain", "a", ".claude", "skills"), "mid", skill("mid"));
+
+      const listed = yield* listClaudeSkills({
+        config: { homePath: path.join(tempDir, "claude-home") },
+        cwds: [cwd],
+        environment: {},
+        builtIns: [],
+        namespacedSynced: new Set(),
+      });
+
+      const names = new Set((listed.get(cwd) ?? []).map((entry) => entry.name));
+      assert.isTrue(names.has("top") && names.has("mid"));
     }),
   );
 });

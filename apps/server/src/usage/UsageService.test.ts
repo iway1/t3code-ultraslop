@@ -288,6 +288,30 @@ describe("UsageService", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("reads only the requested providers' sources", () =>
+    Effect.gen(function* () {
+      const { settings, home, transcript } = yield* setup;
+      const authPath = NodePath.join(home, "config", "cursor", "auth.json");
+      yield* Effect.promise(async () => {
+        await NodeFSP.writeFile(transcript, claudeLine(1, 100));
+        await NodeFSP.mkdir(NodePath.dirname(authPath), { recursive: true });
+        await NodeFSP.writeFile(authPath, "invalid json");
+      });
+      const service = yield* UsageService.make.pipe(
+        Effect.provide(serviceLayers({ prefix: "usage-service-provider-filter", home, settings })),
+      );
+      const providersOf = (summary: {
+        readonly sources: ReadonlyArray<{ readonly fingerprint: { readonly provider: string } }>;
+      }) => [...new Set(summary.sources.map((source) => source.fingerprint.provider))];
+
+      // The saved Cursor login is read, and fails, only when Cursor is asked for.
+      assert.include(providersOf(yield* service.readSummary(WINDOW)), "cursor");
+      const claude = yield* service.readSummary(WINDOW, { providers: ["claude"] });
+      assert.deepStrictEqual(providersOf(claude), ["claude"]);
+      assert.strictEqual(totalOutputTokens(claude), 100);
+    }).pipe(Effect.scoped),
+  );
+
   it.live("does not read the macOS Cursor Keychain before account usage is enabled", () =>
     Effect.gen(function* () {
       const { settings, home } = yield* setup;

@@ -981,6 +981,12 @@ export function createServerEnvironmentAtoms<R, E>(
     concurrency: configConcurrency,
   });
 
+  const skillInventory = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:server:skill-inventory",
+    tag: WS_METHODS.serverGetSkillInventory,
+    staleTimeMs: 30_000,
+  });
+
   return {
     configValueAtom,
     updateStateAtom,
@@ -1094,6 +1100,19 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetSkillUsageSummary,
       staleTimeMs: 30_000,
     }),
+    // Read when a skill's chart opens; naming versions runs git on the server.
+    skillUsageDetail: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:skill-usage-detail",
+      tag: WS_METHODS.serverGetSkillUsageDetail,
+      staleTimeMs: 30_000,
+    }),
+    // Read when the Skill Monitor settings' tool picker opens.
+    skillToolCatalog: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:skill-tool-catalog",
+      tag: WS_METHODS.serverGetSkillToolCatalog,
+      staleTimeMs: 30_000,
+    }),
+    skillInventory,
     resourceTelemetry: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:resource-telemetry",
       tag: WS_METHODS.subscribeResourceTelemetry,
@@ -1153,10 +1172,26 @@ export function createServerEnvironmentAtoms<R, E>(
     setSkillEnabled: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:set-skill-enabled",
       tag: WS_METHODS.serverSetSkillEnabled,
+      // The reply already carries the inventory; the refresh keeps the cached
+      // copy current for the next time the Skill Monitor opens.
+      onSuccess: ({ environmentId }, registry) =>
+        Effect.sync(() => registry.refresh(skillInventory({ environmentId, input: {} }))),
       concurrency: {
         mode: "singleFlight",
         key: ({ environmentId, input }) =>
           JSON.stringify([environmentId, input.instanceId, input.skillName]),
+      },
+    }),
+    setSkillHidden: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:set-skill-hidden",
+      tag: WS_METHODS.serverSetSkillHidden,
+      // As for `setSkillEnabled`: the reply carries the inventory, the refresh
+      // keeps the cached copy current.
+      onSuccess: ({ environmentId }, registry) =>
+        Effect.sync(() => registry.refresh(skillInventory({ environmentId, input: {} }))),
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.skillName]),
       },
     }),
     updateProvider: createEnvironmentRpcCommand(runtime, {

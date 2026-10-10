@@ -1761,6 +1761,218 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
         }),
       );
 
+      it.effect("rebuilds every cached workspace's skills after a skill toggle", () =>
+        Effect.gen(function* () {
+          const driver = ProviderDriverKind.make("codex");
+          const instanceId = ProviderInstanceId.make("codex");
+          const otherId = ProviderInstanceId.make("codex_personal");
+          // "demo" and "lint" are user-wide, so a toggle changes them in every workspace.
+          const skillsFor = (
+            cwd: string,
+            off: ReadonlyArray<string>,
+            added: boolean,
+          ): ServerProvider["skills"] => [
+            { name: "demo", path: "/home/skills/demo/SKILL.md", enabled: !off.includes("demo") },
+            { name: "lint", path: "/home/skills/lint/SKILL.md", enabled: !off.includes("lint") },
+            { name: "local", path: `${cwd}/skills/local/SKILL.md`, enabled: true },
+            ...(added
+              ? [{ name: "added", path: `${cwd}/skills/added/SKILL.md`, enabled: true }]
+              : []),
+          ];
+          // The user settings file: the skills switched off.
+          const settings = yield* Ref.make<ReadonlyArray<string>>([]);
+          const addedIn = yield* Ref.make<ReadonlyArray<string>>([]);
+          const listSkills = (cwd: string) =>
+            Effect.all([Ref.get(settings), Ref.get(addedIn)]).pipe(
+              Effect.map(([off, added]) => skillsFor(cwd, off, added.includes(cwd))),
+            );
+          const refreshes = yield* Ref.make(0);
+          const scans = yield* Ref.make(0);
+          const toggledCwds = yield* Ref.make<ReadonlyArray<string>>([]);
+          const toggleGate = yield* Ref.make<{
+            readonly started: Deferred.Deferred<void>;
+            readonly release: Deferred.Deferred<void>;
+          } | null>(null);
+          const makeInstance = (id: ProviderInstanceId): ProviderInstance => {
+            const provider = {
+              instanceId: id,
+              driver,
+              status: "ready",
+              enabled: true,
+              installed: true,
+              auth: { status: "authenticated" },
+              checkedAt: "2026-06-10T00:00:00.000Z",
+              version: "1.0.0",
+              models: [],
+              slashCommands: [],
+              skills: [],
+            } as const satisfies ServerProvider;
+            return {
+              instanceId: id,
+              driverKind: driver,
+              continuationIdentity: { driverKind: driver, continuationKey: `codex:instance:${id}` },
+              displayName: undefined,
+              enabled: true,
+              snapshot: {
+                resolveMaintenance: () =>
+                  Effect.succeed(
+                    makeManualOnlyProviderMaintenanceCapabilities({
+                      provider: driver,
+                      packageName: null,
+                    }),
+                  ),
+                getSnapshot: Effect.succeed(provider),
+                refresh: Ref.update(refreshes, (count) => count + 1).pipe(Effect.as(provider)),
+                streamChanges: Stream.empty,
+                applyUsageLimits: () => Effect.void,
+              },
+              snapshotForCwd: (cwd) =>
+                Ref.update(scans, (count) => count + 1).pipe(
+                  Effect.andThen(listSkills(cwd)),
+                  Effect.map((skills) => ({
+                    ...provider,
+                    slashCommands: [{ name: "project" }],
+                    skills,
+                  })),
+                ),
+              setSkillEnabled: ({ name: skillName, enabled, cwds }) =>
+                Effect.gen(function* () {
+                  // Read, then rewrite the whole file, like the real drivers.
+                  const off = yield* Ref.get(settings);
+                  yield* Effect.yieldNow;
+                  yield* Ref.set(
+                    settings,
+                    enabled
+                      ? off.filter((name) => name !== skillName)
+                      : [...off.filter((name) => name !== skillName), skillName],
+                  );
+                  yield* Ref.set(toggledCwds, cwds);
+                  const listed = yield* Effect.forEach(cwds, (cwd) =>
+                    listSkills(cwd).pipe(Effect.map((skills) => [cwd, skills] as const)),
+                  );
+                  const gate = yield* Ref.getAndSet(toggleGate, null);
+                  if (gate) {
+                    yield* Deferred.succeed(gate.started, undefined);
+                    yield* Deferred.await(gate.release);
+                  }
+                  return new Map(listed);
+                }),
+              orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+              textGeneration: {} as ProviderInstance["textGeneration"],
+            };
+          };
+          const workspaceSnapshot = (cwd: string, skills: ServerProvider["skills"]) => ({
+            cwd,
+            checkedAt: "2026-06-10T00:00:00.000Z",
+            slashCommands: [{ name: "project" }],
+            skills,
+          });
+          const instances = [makeInstance(instanceId), makeInstance(otherId)];
+          const registryChanges = yield* PubSub.unbounded<void>();
+          const instanceRegistryLayer = Layer.succeed(
+            ProviderInstanceRegistry.ProviderInstanceRegistry,
+            {
+              getInstance: (requestedId) =>
+                Effect.succeed(instances.find((instance) => instance.instanceId === requestedId)),
+              listInstances: Effect.succeed(instances),
+              listUnavailable: Effect.succeed([]),
+              streamChanges: Stream.fromPubSub(registryChanges),
+              subscribeChanges: PubSub.subscribe(registryChanges),
+            },
+          );
+          const scope = yield* Scope.make();
+          yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+          const runtimeServices = yield* Layer.build(
+            ProviderRegistryLive.pipe(
+              Layer.provideMerge(instanceRegistryLayer),
+              Layer.provideMerge(
+                ServerConfig.layerTest(process.cwd(), {
+                  prefix: "t3-provider-registry-skill-toggle-",
+                }),
+              ),
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ).pipe(Scope.provide(scope));
+
+          yield* Effect.gen(function* () {
+            const registry = yield* ProviderRegistry.ProviderRegistry;
+            const snapshotsOf = (id: ProviderInstanceId) =>
+              registry.getProviders.pipe(
+                Effect.map(
+                  (providers) =>
+                    providers.find((provider) => provider.instanceId === id)?.workspaceSnapshots,
+                ),
+              );
+            yield* Effect.forEach(
+              [instanceId, otherId].flatMap((id) =>
+                ["/a", "/b"].map((cwd) => ({ instanceId: id, cwd })),
+              ),
+              (input) => registry.refreshWorkspaceSnapshot(input),
+              { discard: true },
+            );
+            const otherBefore = yield* snapshotsOf(otherId);
+            const scansBefore = yield* Ref.get(scans);
+
+            yield* registry.setSkillEnabled({
+              instanceId,
+              cwd: "/a",
+              skillName: "demo",
+              enabled: false,
+            });
+            assert.deepStrictEqual(yield* Ref.get(toggledCwds), ["/a", "/b"]);
+            assert.deepStrictEqual(yield* snapshotsOf(instanceId), [
+              workspaceSnapshot("/a", skillsFor("/a", ["demo"], false)),
+              workspaceSnapshot("/b", skillsFor("/b", ["demo"], false)),
+            ]);
+            // No full re-probe, no extra scans, and other instances keep their lists.
+            assert.strictEqual(yield* Ref.get(refreshes), 0);
+            assert.strictEqual(yield* Ref.get(scans), scansBefore);
+            assert.deepStrictEqual(yield* snapshotsOf(otherId), otherBefore);
+
+            // A scan that lands while the toggle runs is newer than what the
+            // toggle listed, so the toggle leaves that workspace alone.
+            const started = yield* Deferred.make<void>();
+            const release = yield* Deferred.make<void>();
+            yield* Ref.set(toggleGate, { started, release });
+            const toggle = yield* registry
+              .setSkillEnabled({ instanceId, cwd: "/a", skillName: "demo", enabled: true })
+              .pipe(Effect.forkChild);
+            yield* Deferred.await(started);
+            yield* Ref.set(addedIn, ["/b"]);
+            yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: "/b", fresh: true });
+            yield* Deferred.succeed(release, undefined);
+            yield* Fiber.join(toggle);
+            assert.deepStrictEqual(yield* snapshotsOf(instanceId), [
+              workspaceSnapshot("/a", skillsFor("/a", [], false)),
+              workspaceSnapshot("/b", skillsFor("/b", [], true)),
+            ]);
+
+            // Toggles that overlap both land, in the settings file and in the lists.
+            yield* Effect.all(
+              [
+                registry.setSkillEnabled({
+                  instanceId,
+                  cwd: "/a",
+                  skillName: "demo",
+                  enabled: false,
+                }),
+                registry.setSkillEnabled({
+                  instanceId,
+                  cwd: "/a",
+                  skillName: "lint",
+                  enabled: false,
+                }),
+              ],
+              { concurrency: "unbounded" },
+            );
+            assert.deepStrictEqual(yield* snapshotsOf(instanceId), [
+              workspaceSnapshot("/a", skillsFor("/a", ["demo", "lint"], false)),
+              workspaceSnapshot("/b", skillsFor("/b", ["demo", "lint"], true)),
+            ]);
+          }).pipe(Effect.provide(runtimeServices));
+        }),
+      );
+
       it.effect("refreshes OpenCode catalogs and preserves other providers", () =>
         Effect.gen(function* () {
           const codexDriver = ProviderDriverKind.make("codex");

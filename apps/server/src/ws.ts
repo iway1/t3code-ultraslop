@@ -219,6 +219,7 @@ import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as SkillUsage from "./usage/SkillUsage.ts";
+import * as SkillInventory from "./provider/SkillInventory.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
@@ -1239,6 +1240,7 @@ const makeWsRpcLayer = (
             );
       const usage = yield* UsageService.UsageService;
       const skillUsage = yield* SkillUsage.SkillUsage;
+      const skillInventory = yield* SkillInventory.SkillInventory;
       const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
@@ -2608,17 +2610,31 @@ const makeWsRpcLayer = (
             "rpc.aggregate": "server",
           }),
         [WS_METHODS.serverSetSkillEnabled]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.serverSetSkillEnabled,
-            providerRegistry
-              .setSkillEnabled(input)
-              .pipe(Effect.map((providers) => ({ providers }))),
-            { "rpc.aggregate": "server" },
-          ),
+          observeRpcEffect(WS_METHODS.serverSetSkillEnabled, skillInventory.setEnabled(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverSetSkillHidden]: (input) =>
+          observeRpcEffect(WS_METHODS.serverSetSkillHidden, skillInventory.setHidden(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverGetSkillInventory]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverGetSkillInventory, skillInventory.list, {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.serverGetSkillUsageSummary]: (input) =>
           observeRpcEffect(WS_METHODS.serverGetSkillUsageSummary, skillUsage.readSummary(input), {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverGetSkillUsageDetail]: (input) =>
+          observeRpcEffect(WS_METHODS.serverGetSkillUsageDetail, skillUsage.readDetail(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverGetSkillToolCatalog]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverGetSkillToolCatalog,
+            skillUsage.readToolCatalog(input),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.serverRefreshUsageRates]: (_input) =>
           observeRpcEffect(WS_METHODS.serverRefreshUsageRates, usage.refreshRates, {
             "rpc.aggregate": "server",

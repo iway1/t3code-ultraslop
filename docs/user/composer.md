@@ -184,19 +184,47 @@ The slash menu also includes skills unless you turn off **Settings → General �
 Show skills in slash menu**. Only skills enabled for the provider are listed.
 
 On web and desktop, choose **Skill Monitor** in the right panel or the command
-palette to see your skills in a table. Click a column to sort by it, and a
-skill's name to open its instructions; hover the name for its description.
+palette to see your skills in a table: every skill Claude Code and Codex can
+load in any of your projects and their worktrees, including built-in and plugin
+skills. Pick a project at the top to see only the skills that load there. Click
+a column to sort by it, drag a column's header to move it, and click a skill's
+name to open its instructions; hover the name for its description.
 
 - The top line estimates the tokens your skills add to every new session, since
   the provider lists each skill's name and description so the agent knows it
   exists. Each row shows its own share.
 - If Claude Code or Codex is installed, it gets a column of switches that turn
-  a skill on or off in that harness's own settings, for every project. A change
-  applies from the next agent session.
+  a skill on or off in that harness's own settings, for every project on the
+  machine. A change applies from the next agent session. A skill that comes
+  with a Claude Code plugin turns on and off with its plugin instead.
 - A skill that has run shows how often it ran, its average tokens per run, and
   how its time split between the model, tool calls, and waiting on you, with
   the tool that took longest. These cover the whole turn the skill ran in and
   any subagents that turn started.
+- To follow one tool or command, add it under **Tool columns** in the Skill
+  Monitor settings. Its column shows the average time a completed run spends
+  on it, counting runs that never call it as zero. Commands are grouped by what
+  they run, such as `pnpm test` or `gh pr`, and scripts by their file name, such
+  as `build.ts`.
+- With Claude Code or Codex, it also estimates the share of your 5-hour and
+  weekly usage limits an average run takes. Providers only report your
+  account's total, so T3 Code prices each run's own tokens at the rate your
+  account was using its limits, measured from the agent sessions on that
+  machine. Runs in parallel count only their own work. Use elsewhere, such as
+  on claude.ai or another computer, makes the estimate run high. The **5-hour
+  limit (7 days)** column adds up the 5-hour shares of every run in the last
+  week, finished or not.
+- The **×** at the start of a row hides that skill: it turns it off in Claude
+  Code and Codex for every project on the machine and removes it from the table. Hidden skills
+  are listed under **Settings → Skill Monitor → Hidden skills**, where showing
+  one again turns it back on. The list is kept by the machine, so every device
+  connected to it sees the same one.
+
+When you open a skill's instructions, from the panel or anywhere else, the same
+columns for that skill appear above them. The chart button beside them, or
+beside a skill's name in the table, compares any of those numbers across the
+skill's versions and the models it ran with. Versions are named after the commit that introduced them, or show as
+uncommitted when the skill changed since its last commit or isn't kept in git.
 
 Choose the columns in **Settings → Skill Monitor**, or from the cog at the top
 of the panel. Usage is kept on the machine that ran the agent.

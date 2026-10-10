@@ -38,7 +38,12 @@ import {
   type ProviderDriverKind,
 } from "./providerInstance.ts";
 import { PullRequestMergeMethod } from "./pullRequest.ts";
-import { MAX_SKILL_USAGE_WINDOWS, SkillUsageWindowDays } from "./skillUsage.ts";
+import {
+  MAX_SKILL_TOOL_COLUMNS,
+  MAX_SKILL_USAGE_WINDOWS,
+  SkillToolRef,
+  SkillUsageWindowDays,
+} from "./skillUsage.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -304,9 +309,18 @@ const SkillMonitorSettingsFields = Schema.Struct({
   showAverageToolTime: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   showAverageWaitingTime: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   showSlowestTool: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  showAverageSessionLimit: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  showAverageWeeklyLimit: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  showRecentSessionLimit: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   usageWindowsDays: Schema.Array(SkillUsageWindowDays)
     .check(Schema.isMaxLength(MAX_SKILL_USAGE_WINDOWS))
     .pipe(Schema.withDecodingDefault(Effect.succeed([7]))),
+  /** Tools with a column of their own, in the order they were added. */
+  toolColumns: Schema.Array(SkillToolRef)
+    .check(Schema.isMaxLength(MAX_SKILL_TOOL_COLUMNS))
+    .pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  /** Metric column keys in the order the user dragged them into; unlisted columns follow. */
+  columnOrder: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
 export const SkillMonitorSettings = SkillMonitorSettingsFields.pipe(
   Schema.withDecodingDefault(Effect.succeed({})),
@@ -1422,6 +1436,10 @@ export const ServerSettings = Schema.Struct({
   cursorKeychainUsageEnabled: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
+  /** Skills the Skill Monitor hides, by name. Hiding one also switched it off; see `SkillInventory`. */
+  hiddenSkills: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   /** Exact model IDs, applied to past and future usage on this environment. */
   usagePriceOverrides: Schema.Record(TrimmedNonEmptyString, UsageModelPriceOverride).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
@@ -1725,6 +1743,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Record(UsageLimitSourceId, Schema.NullOr(UsageLimitSourceConfig)),
   ),
   cursorKeychainUsageEnabled: Schema.optionalKey(Schema.Boolean),
+  hiddenSkills: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
   /** Each entry replaces one model's rates; `null` restores automatic pricing. */
   usagePriceOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(UsageModelPriceOverride)),

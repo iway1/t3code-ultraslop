@@ -73,16 +73,21 @@ export function getProviderSlashCommandsForSlashMenu(
   return slashCommands.filter((command) => !skillNames.has(command.name.trim().toLowerCase()));
 }
 
-export function resolveProviderSkillSourceKind(
-  skill: Pick<ServerProviderSkill, "path" | "scope">,
-): ProviderSkillSourceKind {
-  const normalizedPath = normalizePathSeparators(skill.path);
+export function resolveProviderSkillSourceKind(skill: {
+  readonly path?: string | undefined;
+  readonly scope?: string | undefined;
+}): ProviderSkillSourceKind {
+  const normalizedPath = normalizePathSeparators(skill.path ?? "");
   if (normalizedPath.includes("/.codex/plugins/") || normalizedPath.includes("/.agents/plugins/")) {
     return "app";
   }
 
   const normalizedScope = skill.scope?.trim().toLowerCase();
   switch (normalizedScope) {
+    case "plugin":
+      return "app";
+    case "synced":
+      return "personal";
     case "repo":
     case "repository":
       return "repo";
@@ -137,12 +142,12 @@ const CHARACTERS_PER_TOKEN = 4;
 export function estimateSkillAmbientTokens(
   skill: Pick<
     ServerProviderSkill,
-    "name" | "description" | "shortDescription" | "path" | "enabled" | "userInvocationOnly"
-  >,
+    "name" | "description" | "shortDescription" | "enabled" | "userInvocationOnly"
+  > & { readonly path?: string | undefined },
   driver: string,
 ): number {
   if (!skill.enabled || skill.userInvocationOnly === true) return 0;
   const description = skill.description ?? skill.shortDescription ?? "";
-  const path = driver === "codex" ? ` (file: ${skill.path})` : "";
+  const path = driver === "codex" && skill.path ? ` (file: ${skill.path})` : "";
   return Math.ceil(`- ${skill.name}: ${description}${path}`.length / CHARACTERS_PER_TOKEN);
 }

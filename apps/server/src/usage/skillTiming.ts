@@ -54,19 +54,80 @@ function overlap(interval: Interval, merged: ReadonlyArray<Interval>): number {
   );
 }
 
-/** Groups shell commands by what they run: `pnpm test`, not `pnpm test --filter web`. */
+const INTERPRETERS = new Set([
+  "bash",
+  "bun",
+  "deno",
+  "node",
+  "perl",
+  "python",
+  "python3",
+  "ruby",
+  "sh",
+  "ts-node",
+  "tsx",
+  "zsh",
+]);
+const SCRIPT_FILE = /\.(?:[cm]?[jt]s|py|sh|rb|pl)$/u;
+// After these, the next word names what runs: `pnpm run build`, `uv run pytest`.
+const RUNNER_SUBCOMMANDS = new Set(["dlx", "exec", "run", "x"]);
+// Their first argument is a pattern or a path, not a subcommand.
+const PLAIN_COMMANDS = new Set([
+  "awk",
+  "cat",
+  "cp",
+  "echo",
+  "find",
+  "grep",
+  "head",
+  "ls",
+  "mkdir",
+  "mv",
+  "rg",
+  "rm",
+  "sed",
+  "tail",
+  "touch",
+  "wc",
+]);
+const SUBCOMMAND = /^[a-z][\w:-]*$/u;
+
+const baseName = (path: string) => path.split("/").at(-1) ?? path;
+
+/**
+ * Groups shell commands by what they run: `pnpm test`, not `pnpm test --filter
+ * web`. A script is named by its file, so `node scripts/build.ts` and
+ * `npx tsx /abs/scripts/build.ts` both group as `build.ts`.
+ */
 export function commandLabel(input: string): string {
   let command = input.trim().split("\n")[0] ?? "";
   // Codex wraps commands in a login shell: `/bin/zsh -lc 'pnpm test'`.
   const wrapped = /^(?:\S*\/)?(?:ba|z)?sh\s+-l?c\s+(['"])(.*)\1$/u.exec(command);
   if (wrapped) command = wrapped[2] ?? command;
   command = command.replace(/^cd\s+\S+\s*&&\s*/u, "");
-  const words = command.split(/\s+/u).filter((word) => !/^[A-Z_][A-Z0-9_]*=/u.test(word));
-  const [program = "", subcommand] = words;
-  const name = program.split("/").at(-1) ?? program;
-  return subcommand !== undefined && /^[a-z][\w:-]*$/u.test(subcommand)
-    ? `${name} ${subcommand}`
-    : name || "command";
+  // Only the first command of a pipeline or chain.
+  command = command.split(/\s*(?:\|\|?|&&|;)\s*/u)[0] ?? "";
+  const words = command
+    .split(/\s+/u)
+    .filter((word) => word !== "" && !/^[A-Z_][A-Z0-9_]*=/u.test(word));
+  // An interpreter in the first few words, maybe behind a runner (`npx tsx`,
+  // `uv run python`), hands the label to the script it runs.
+  const interpreter = words.slice(0, 3).findIndex((word) => INTERPRETERS.has(baseName(word)));
+  const script =
+    interpreter === -1
+      ? -1
+      : words.findIndex((word, index) => index > interpreter && SCRIPT_FILE.test(word));
+  const [program = "", first, second] = script === -1 ? words : words.slice(script);
+  const name = baseName(program);
+  if (name === "") return "command";
+  if (PLAIN_COMMANDS.has(name)) return name;
+  if (name.startsWith("python") && first === "-m" && second !== undefined) {
+    return `${name} -m ${second}`;
+  }
+  if (first === undefined || !SUBCOMMAND.test(first)) return name;
+  return RUNNER_SUBCOMMANDS.has(first) && second !== undefined && SUBCOMMAND.test(second)
+    ? `${name} ${first} ${second}`
+    : `${name} ${first}`;
 }
 
 function toolOf(item: OrchestrationV2TurnItem): Pick<ToolGroup, "kind" | "label"> | null {

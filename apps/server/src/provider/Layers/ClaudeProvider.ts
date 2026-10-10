@@ -225,7 +225,7 @@ function nonEmptyProbeString(value: string): string | undefined {
   return candidate ? candidate : undefined;
 }
 
-type ClaudeCapabilitiesProbe = {
+export type ClaudeCapabilitiesProbe = {
   readonly email: string | undefined;
   readonly subscriptionType: string | undefined;
   readonly tokenSource: string | undefined;
@@ -242,6 +242,11 @@ type ClaudeCapabilitiesProbe = {
    * otherwise successful response mean the account has none (API key).
    */
   readonly usage?: Pick<SDKControlGetUsageResponse, "rate_limits_available" | "rate_limits">;
+  /**
+   * The skills the CLI loaded and where each came from (`built-in`,
+   * `syncedSkills`, `plugin`, ...), or `undefined` when it would not say.
+   */
+  readonly loadedSkills?: ReadonlyArray<{ readonly name: string; readonly source: string }>;
 };
 
 function parseClaudeInitializationCommands(
@@ -373,6 +378,17 @@ const probeClaudeCapabilities = (
               rate_limits: usageResult.success.rate_limits,
             }
           : undefined;
+        // Answered from local estimates, so it costs no API call. The Skill
+        // Monitor needs the built-in skills, which exist nowhere on disk.
+        const contextResult = yield* Effect.tryPromise(() =>
+          q.getContextUsage({ detail: "summary" }),
+        ).pipe(Effect.timeout(DEFAULT_TIMEOUT_MS), Effect.result);
+        const loadedSkills = Result.isSuccess(contextResult)
+          ? (contextResult.success.skills?.skillFrontmatter ?? []).map(({ name, source }) => ({
+              name,
+              source,
+            }))
+          : undefined;
         const account = init.account as
           | {
               readonly email?: string;
@@ -388,6 +404,7 @@ const probeClaudeCapabilities = (
           apiProvider: account?.apiProvider,
           slashCommands: parseClaudeInitializationCommands(init.commands),
           ...(usage ? { usage } : {}),
+          ...(loadedSkills ? { loadedSkills } : {}),
         } satisfies ClaudeCapabilitiesProbe;
       }),
     ),

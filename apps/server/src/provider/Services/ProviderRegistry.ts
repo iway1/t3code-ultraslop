@@ -63,8 +63,10 @@ export interface ProviderRegistryShape {
   }) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
   /**
-   * Switch one of the cwd's listed skills on or off in the provider's
-   * user-wide config, then rescan the cwd so every client sees the change.
+   * Switch every skill with the given name on or off in the provider's
+   * user-wide config, then rebuild the skills of every workspace cached for
+   * the instance so every client sees the change. The caller checks that the
+   * provider lists the name; see `SkillInventory`.
    */
   readonly setSkillEnabled: (
     input: SetSkillEnabledInput,

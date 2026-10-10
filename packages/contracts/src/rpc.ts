@@ -305,10 +305,15 @@ import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from ".
 import {
   SetSkillEnabledInput,
   SkillToggleError,
+  SkillToolCatalog,
+  SkillToolCatalogInput,
+  SkillUsageDetail,
+  SkillUsageDetailInput,
   SkillUsageReadError,
   SkillUsageSummary,
   SkillUsageSummaryInput,
 } from "./skillUsage.ts";
+import { SetSkillHiddenInput, SkillInventory, SkillInventoryInput } from "./skillInventory.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   ScheduledTaskDeleteInput,
@@ -473,7 +478,11 @@ export const WS_METHODS = {
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
   serverGetUsageSummary: "server.getUsageSummary",
   serverGetSkillUsageSummary: "server.getSkillUsageSummary",
+  serverGetSkillUsageDetail: "server.getSkillUsageDetail",
+  serverGetSkillToolCatalog: "server.getSkillToolCatalog",
   serverSetSkillEnabled: "server.setSkillEnabled",
+  serverGetSkillInventory: "server.getSkillInventory",
+  serverSetSkillHidden: "server.setSkillHidden",
   serverRefreshUsageRates: "server.refreshUsageRates",
 
   // Scheduled tasks
@@ -847,13 +856,37 @@ const WsServerGetUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetUsageSummary, {
 
 const WsServerSetSkillEnabledRpc = Rpc.make(WS_METHODS.serverSetSkillEnabled, {
   payload: SetSkillEnabledInput,
-  success: ServerProviderUpdatedPayload,
+  success: SkillInventory,
   error: Schema.Union([EnvironmentAuthorizationError, SkillToggleError]),
+});
+
+const WsServerSetSkillHiddenRpc = Rpc.make(WS_METHODS.serverSetSkillHidden, {
+  payload: SetSkillHiddenInput,
+  success: SkillInventory,
+  error: Schema.Union([EnvironmentAuthorizationError, SkillToggleError]),
+});
+
+const WsServerGetSkillInventoryRpc = Rpc.make(WS_METHODS.serverGetSkillInventory, {
+  payload: SkillInventoryInput,
+  success: SkillInventory,
+  error: EnvironmentAuthorizationError,
 });
 
 const WsServerGetSkillUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetSkillUsageSummary, {
   payload: SkillUsageSummaryInput,
   success: SkillUsageSummary,
+  error: Schema.Union([EnvironmentAuthorizationError, SkillUsageReadError]),
+});
+
+const WsServerGetSkillUsageDetailRpc = Rpc.make(WS_METHODS.serverGetSkillUsageDetail, {
+  payload: SkillUsageDetailInput,
+  success: SkillUsageDetail,
+  error: Schema.Union([EnvironmentAuthorizationError, SkillUsageReadError]),
+});
+
+const WsServerGetSkillToolCatalogRpc = Rpc.make(WS_METHODS.serverGetSkillToolCatalog, {
+  payload: SkillToolCatalogInput,
+  success: SkillToolCatalog,
   error: Schema.Union([EnvironmentAuthorizationError, SkillUsageReadError]),
 });
 
@@ -1761,7 +1794,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
   WsServerGetSkillUsageSummaryRpc,
+  WsServerGetSkillUsageDetailRpc,
+  WsServerGetSkillToolCatalogRpc,
   WsServerSetSkillEnabledRpc,
+  WsServerSetSkillHiddenRpc,
+  WsServerGetSkillInventoryRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
   WsScheduledTasksListRpc,

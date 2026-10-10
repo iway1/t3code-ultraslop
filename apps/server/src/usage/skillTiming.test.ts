@@ -34,6 +34,44 @@ describe("commandLabel", () => {
       ["pnpm test", "pnpm test", "vp test", "git status", "build.sh", "ls"],
     );
   });
+
+  it("names scripts by their file and keeps what a runner runs", () => {
+    assert.deepStrictEqual(
+      [
+        "node scripts/mobile-native-client.ts ensure ios",
+        "npx tsx /Users/me/repo/.worktrees/a/scripts/gen.ts --out x",
+        "python3 -u tools/build.py",
+        "uv run python tools/build.py",
+        "node -e 'console.log(1)'",
+        "pnpm run build:web",
+        "vp run dev",
+        "uv run pytest -x",
+        "cargo run --bin server",
+        "python -m pytest -x",
+        "node scripts/check.ts | tail -20",
+      ].map(commandLabel),
+      [
+        "mobile-native-client.ts ensure",
+        "gen.ts",
+        "build.py",
+        "build.py",
+        "node",
+        "pnpm run build:web",
+        "vp run dev",
+        "uv run pytest",
+        "cargo run",
+        "python -m pytest",
+        "check.ts",
+      ],
+    );
+  });
+
+  it("does not take a pattern or path for a subcommand", () => {
+    assert.deepStrictEqual(
+      ["rg somePattern src", "cat foo.ts", "ls src", "gh pr view 12"].map(commandLabel),
+      ["rg", "cat", "ls", "gh pr"],
+    );
+  });
 });
 
 describe("turnTimingOf", () => {

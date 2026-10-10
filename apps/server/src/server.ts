@@ -151,6 +151,7 @@ import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinar
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as SkillUsage from "./usage/SkillUsage.ts";
+import * as SkillInventory from "./provider/SkillInventory.ts";
 import {
   OrchestrationEventInfrastructureLayerLive,
   OrchestrationV2ProductionLayerLive,
@@ -549,6 +550,9 @@ const RuntimeCoreDependenciesBaseLive = Layer.mergeAll(
   ProviderInstallationRefreshLive,
   ReplayMarkers.layer,
 ).pipe(
+  // The Skill Monitor's list of every skill, read by ws.ts. Provided here
+  // rather than in the list above, whose merged type is at its limit.
+  Layer.provideMerge(SkillInventory.layer),
   // Core Services
   Layer.provideMerge(OrchestrationApplicationLayerLive),
   Layer.provideMerge(OrchestrationEventInfrastructureLayerLive),

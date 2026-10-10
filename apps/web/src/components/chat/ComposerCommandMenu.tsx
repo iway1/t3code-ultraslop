@@ -257,6 +257,18 @@ const SKILL_SOURCE_LABEL_BY_KIND: Record<ProviderSkillSourceKind, string> = {
   other: "Provider",
 };
 
+/** The icon of `SkillSourceBadge` alone, named for screen readers. */
+export function SkillSourceIcon(props: { kind: ProviderSkillSourceKind; className?: string }) {
+  const Icon = SKILL_SOURCE_ICON_BY_KIND[props.kind];
+  return (
+    <Icon
+      role="img"
+      aria-label={SKILL_SOURCE_LABEL_BY_KIND[props.kind]}
+      {...(props.className === undefined ? {} : { className: props.className })}
+    />
+  );
+}
+
 /** Where a skill comes from (App, Repo, Personal…), as the `$` picker and Skill Monitor show it. */
 export function SkillSourceBadge(props: { kind: ProviderSkillSourceKind }) {
   const Icon = SKILL_SOURCE_ICON_BY_KIND[props.kind];

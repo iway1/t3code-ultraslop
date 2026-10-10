@@ -45,6 +45,7 @@ import * as ResetCreditCoordinator from "../Layers/resetCreditCoordinator.ts";
 import {
   checkCodexProviderStatus,
   makePendingCodexProvider,
+  listCodexSkillsForCwds,
   probeCodexSkillsForCwd,
   setCodexSkillEnabled,
   withCodexAppServerClient,
@@ -369,8 +370,9 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
 
       const setSkillEnabled: NonNullable<ProviderInstance["setSkillEnabled"]> = ({
         cwd,
-        skill,
+        name,
         enabled: skillEnabled,
+        cwds,
       }) =>
         setCodexSkillEnabled({
           binaryPath: effectiveConfig.binaryPath,
@@ -378,8 +380,9 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
           launchArgs: resolveCodexLaunchArgs(effectiveConfig.launchArgs, processEnv),
           cwd,
           environment: processEnv,
-          path: skill.path,
+          name,
           enabled: skillEnabled,
+          cwds,
         }).pipe(
           Effect.scoped,
           Effect.timeout("20 seconds"),
@@ -390,6 +393,27 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
                 driver: DRIVER_KIND,
                 instanceId,
                 detail: "Codex could not change the skill setting.",
+                cause,
+              }),
+          ),
+        );
+      const listSkills: NonNullable<ProviderInstance["listSkills"]> = ({ cwds }) =>
+        listCodexSkillsForCwds({
+          binaryPath: effectiveConfig.binaryPath,
+          homePath: effectiveConfig.homePath,
+          launchArgs: resolveCodexLaunchArgs(effectiveConfig.launchArgs, processEnv),
+          cwds,
+          environment: processEnv,
+        }).pipe(
+          Effect.scoped,
+          Effect.timeout("20 seconds"),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.mapError(
+            (cause) =>
+              new ProviderDriverError({
+                driver: DRIVER_KIND,
+                instanceId,
+                detail: "Codex could not list its skills.",
                 cause,
               }),
           ),
@@ -405,6 +429,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         snapshot,
         snapshotForCwd,
         setSkillEnabled,
+        listSkills,
         consumeResetCredit,
         orchestrationAdapter,
         textGeneration,
